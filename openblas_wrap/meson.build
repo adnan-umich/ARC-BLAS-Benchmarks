@@ -38,7 +38,7 @@ flapack_module = custom_target('flapack_module',
 py3.extension_module('_flapack',
   flapack_module,
   link_args: [],  # version_link_args,
-  dependencies: [openblas_dep, fortranobject_dep],
+  dependencies: [flexiblas_dep,fortranobject_dep],
   install: true,
   subdir: 'openblas_wrap'
 )

@@ -5,10 +5,9 @@ from benchmarking.
 
 __version__ = "0.1"  
 
-import scipy_openblas32   # preload symbols. typically done in _distributor_init.py
 from . import _flapack
 
-PREFIX = 'scipy_'
+PREFIX = ''
 
 
 def get_func(name, variant):

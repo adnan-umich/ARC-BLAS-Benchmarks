@@ -38,9 +38,9 @@ endif
 
 generate_f2pymod = find_program('openblas_wrap/generate_f2pymod.py')
 
-openblas = dependency('scipy_openblas', method: 'pkg-config', required: true)
-openblas_dep = declare_dependency(
-  dependencies: openblas,
+ flexiblas = dependency('flexiblas', method: 'pkg-config', required: true)
+ flexiblas_dep = declare_dependency(
+  dependencies: flexiblas,
   compile_args: []
 )
 
