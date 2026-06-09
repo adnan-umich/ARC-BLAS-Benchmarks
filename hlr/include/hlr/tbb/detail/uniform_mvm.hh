@@ -1,0 +1,846 @@
+#ifndef __HLR_TBB_ARITH_UNIFORM_MVM_HH
+#define __HLR_TBB_ARITH_UNIFORM_MVM_HH
+//
+// Project     : HLR
+// Module      : tbb/detail/uniform_mvm.hh
+// Description : matrix-vector product for uniform matrices with TBB
+// Author      : Ronald Kriemann
+// Copyright   : Max Planck Institute MIS 2004-2024. All Rights Reserved.
+//
+
+#include <hlr/arith/blas.hh>
+#include <hlr/arith/uniform.hh>
+#include <hlr/matrix/uniform_lrmatrix.hh>
+#include <hlr/matrix/uniform_lr2matrix.hh>
+#include <hlr/vector/scalar_vector.hh>
+#include <hlr/vector/uniform_vector.hh>
+#include <hlr/utils/hash.hh>
+
+namespace hlr { namespace tbb { namespace uniform { namespace detail {
+
+using hlr::matrix::shared_cluster_basis;
+using hlr::matrix::shared_cluster_basis_hierarchy;
+using hlr::matrix::uniform_lrmatrix;
+using hlr::matrix::uniform_lr2matrix;
+using hlr::matrix::level_hierarchy;
+using hlr::vector::scalar_vector;
+using hlr::vector::uniform_vector;
+using hlr::vector::uniform_vector_hierarchy;
+
+using  mutex_map_t = std::vector< std::mutex >;
+
+//
+// compute mat-vec M·x = y with uniform vectors x,y.
+// For dense blocks of M, the actual result is directly updated.
+//
+template < typename value_t >
+void
+mul_vec_mtx ( const value_t                                              alpha,
+              const Hpro::matop_t                                        op_M,
+              const Hpro::TMatrix< value_t > &                           M,
+              const uniform_vector< shared_cluster_basis< value_t > > &  x,
+              uniform_vector< shared_cluster_basis< value_t > > &        y,
+              const scalar_vector< value_t > &                           sx,
+              scalar_vector< value_t > &                                 sy,
+              mutex_map_t &                                              mtx_map )
+{
+    if ( is_blocked( M ) )
+    {
+        auto  B = cptrcast( &M, Hpro::TBlockMatrix< value_t > );
+
+        HLR_ASSERT(( B->nblock_rows( op_M ) == y.nblocks() ) &&
+                   ( B->nblock_cols( op_M ) == x.nblocks() ));
+            
+        ::tbb::parallel_for(
+            ::tbb::blocked_range2d< size_t >( 0, B->nblock_rows( op_M ),
+                                              0, B->nblock_cols( op_M ) ),
+            [&,alpha,op_M,B] ( const auto &  r )
+            {
+                for ( auto  i = r.rows().begin(); i != r.rows().end(); ++i )
+                {
+                    for ( auto  j = r.cols().begin(); j != r.cols().end(); ++j )
+                    {
+                        auto  B_ij = B->block( i, j, op_M );
+            
+                        if ( ! is_null( B_ij ) )
+                        {
+                            auto  x_j = x.block( j );
+                            auto  y_i = y.block( i );
+                            
+                            mul_vec_mtx( alpha, op_M, *B_ij, *x_j, *y_i, sx, sy, mtx_map );
+                        }// if
+                    }// for
+                }// for
+            } );
+    }// if
+    else if ( hlr::matrix::is_dense( M ) )
+    {
+        auto  x_i  = blas::vector< value_t >( blas::vec( sx ), M.col_is( op_M ) - sx.ofs() );
+        auto  y_j  = blas::vector< value_t >( blas::vec( sy ), M.row_is( op_M ) - sy.ofs() );
+        auto  lock = std::scoped_lock( mtx_map[ y.basis().id() ] );
+        
+        M.apply_add( alpha, x_i, y_j, op_M );
+    }// if
+    else if ( hlr::matrix::is_uniform_lowrank( M ) )
+    {
+        auto  R    = cptrcast( &M, uniform_lrmatrix< value_t > );
+        auto  lock = std::scoped_lock( y.mutex() );
+
+        R->uni_apply_add( alpha, x.coeffs(), y.coeffs(), op_M );
+    }// if
+    else if ( hlr::matrix::is_uniform_lowrank2( M ) )
+    {
+        auto  R    = cptrcast( &M, uniform_lr2matrix< value_t > );
+        auto  lock = std::scoped_lock( y.mutex() );
+
+        R->uni_apply_add( alpha, x.coeffs(), y.coeffs(), op_M );
+    }// if
+    else
+        HLR_ERROR( "unsupported matrix type : " + M.typestr() );
+}
+
+template < typename value_t >
+void
+mul_vec_row ( const value_t                                              alpha,
+              const Hpro::matop_t                                        op_M,
+              const Hpro::TMatrix< value_t > &                           M,
+              const uniform_vector< shared_cluster_basis< value_t > > &  x,
+              uniform_vector< shared_cluster_basis< value_t > > &        y,
+              const scalar_vector< value_t > &                           sx,
+              scalar_vector< value_t > &                                 sy )
+{
+    if ( is_blocked( M ) )
+    {
+        auto  B = cptrcast( &M, Hpro::TBlockMatrix< value_t > );
+
+        HLR_ASSERT(( B->nblock_rows( op_M ) == y.nblocks() ) &&
+                   ( B->nblock_cols( op_M ) == x.nblocks() ));
+
+        //
+        // parallelise only block rows, then only one task will access y
+        //
+        
+        ::tbb::parallel_for< uint >(
+            0, B->nblock_rows( op_M ),
+            [&,alpha,op_M,B] ( const auto  i )
+            {
+                auto  y_i = y.block( i );
+                
+                for ( uint  j = 0; j < B->nblock_cols( op_M ); ++j )
+                {
+                    auto  B_ij = B->block( i, j, op_M );
+                    
+                    if ( ! is_null( B_ij ) )
+                    {
+                        auto  x_j = x.block( j );
+                        
+                        mul_vec_row( alpha, op_M, *B_ij, *x_j, *y_i, sx, sy );
+                    }// if
+                }// for
+            } );
+    }// if
+    else if ( hlr::matrix::is_dense( M ) )
+    {
+        auto  x_i = blas::vector< value_t >( blas::vec( sx ), M.col_is( op_M ) - sx.ofs() );
+        auto  y_j = blas::vector< value_t >( blas::vec( sy ), M.row_is( op_M ) - sy.ofs() );
+        
+        M.apply_add( alpha, x_i, y_j, op_M );
+    }// if
+    else if ( hlr::matrix::is_uniform_lowrank( M ) )
+    {
+        auto  R = cptrcast( &M, uniform_lrmatrix< value_t > );
+
+        R->uni_apply_add( alpha, x.coeffs(), y.coeffs(), op_M );
+    }// if
+    else if ( hlr::matrix::is_uniform_lowrank2( M ) )
+    {
+        auto  R = cptrcast( &M, uniform_lr2matrix< value_t > );
+
+        R->uni_apply_add( alpha, x.coeffs(), y.coeffs(), op_M );
+    }// if
+    else
+        HLR_ERROR( "unsupported matrix type : " + M.typestr() );
+}
+
+//
+// copy given scalar vector into uniform vector format
+//
+template < typename value_t >
+std::unique_ptr< uniform_vector< shared_cluster_basis< value_t > > >
+scalar_to_uniform ( const shared_cluster_basis< value_t > &  cb,
+                    const scalar_vector< value_t > &         v )
+{
+    auto  u = std::make_unique< uniform_vector< shared_cluster_basis< value_t > > >( cb );
+
+    ::tbb::parallel_invoke(
+        [&] ()
+        {                    
+            if ( cb.rank() > 0 )
+            {
+                auto  v_cb = blas::vector< value_t >( blas::vec( v ), cb.is() - v.ofs() );
+                auto  s    = cb.transform_forward( v_cb );
+                
+                u->set_coeffs( std::move( s ) );
+            }// if
+        },
+
+        [&] ()
+        {
+            if ( cb.nsons() > 0 )
+            {
+                ::tbb::parallel_for(
+                    uint(0), cb.nsons(),
+                    [&] ( const uint  i )
+                    {
+                        u->set_block( i, scalar_to_uniform( *cb.son(i), v ).release() );
+                    }
+                );
+            }// if
+        } );
+
+    return u;
+}
+
+//
+// create empty uniform vector for given cluster basis
+//
+template < typename value_t >
+std::unique_ptr< uniform_vector< shared_cluster_basis< value_t > > >
+make_uniform ( const shared_cluster_basis< value_t > &  cb )
+{
+    auto  u = std::make_unique< uniform_vector< shared_cluster_basis< value_t > > >( cb );
+
+    if ( cb.nsons() > 0 )
+    {
+        ::tbb::parallel_for(
+            uint(0), cb.nsons(),
+            [&] ( const uint  i )
+            {
+                u->set_block( i, make_uniform( *cb.son(i) ).release() );
+            }
+        );
+    }// if
+
+    return u;
+}
+
+//
+// add coefficients of uniform vector y to scalar vector y
+//
+template < typename value_t >
+void
+add_uniform_to_scalar ( const uniform_vector< shared_cluster_basis< value_t > > &  u,
+                        scalar_vector< value_t > &                                 v )
+{
+    if ( u.basis().rank() > 0 )
+    {
+        // auto  v_u = blas::vector< value_t >( blas::vec( v ), u.is() - v.ofs() );
+
+        // u.basis().transform_backward( u.coeffs(), v_u );
+
+        auto  x   = u.basis().transform_backward( u.coeffs() );
+        auto  v_u = blas::vector< value_t >( blas::vec( v ), u.is() - v.ofs() );
+            
+        blas::add( value_t(1), x, v_u );
+    }// if
+
+    if ( u.nblocks() > 0 )
+    {
+        ::tbb::parallel_for(
+            uint(0), u.nblocks(),
+            [&] ( const uint  i )
+            {
+                add_uniform_to_scalar( *u.block(i), v );
+            }
+        );
+    }// if
+}
+
+//
+// uniform mat-vec with level-wise approach
+//
+template < typename value_t >
+std::unique_ptr< uniform_vector_hierarchy< shared_cluster_basis< value_t > > >
+scalar_to_uniform ( const shared_cluster_basis_hierarchy< value_t > &  cb,
+                    const scalar_vector< value_t > &                   v )
+{
+    auto        hier = std::make_unique< uniform_vector_hierarchy< shared_cluster_basis< value_t > > >();
+    const auto  nlvl = cb.hierarchy().size();
+    
+    hier->set_nlevel( nlvl );
+
+    ::tbb::parallel_for< uint >(
+        0, nlvl,
+        [&] ( const uint  lvl )
+        // for ( uint  lvl = 0; lvl < nlvl; ++lvl )
+        {
+            const auto  ncb = cb.hierarchy()[lvl].size();
+            
+            hier->hierarchy()[lvl].resize( ncb );
+            
+            ::tbb::parallel_for< uint >(
+                0, ncb,
+                [&,lvl] ( const uint  i )
+                {
+                    auto  cb_i = cb.hierarchy()[lvl][i];
+                    
+                    if ( ! is_null( cb_i ) && ( cb_i->rank() > 0 ))
+                    {
+                        auto  u_i  = std::make_unique< uniform_vector< shared_cluster_basis< value_t > > >( *cb_i );
+                        auto  v_cb = blas::vector< value_t >( blas::vec( v ), cb_i->is() - v.ofs() );
+                        auto  s    = cb_i->transform_forward( v_cb );
+                        
+                        u_i->set_coeffs( std::move( s ) );
+                        hier->hierarchy()[lvl][i] = u_i.release();
+                    }// if
+                } );
+        } ); // }// for
+    
+    return hier;
+}
+
+template < typename value_t >
+void
+mul_vec_hier ( const value_t                                                        alpha,
+               const Hpro::matop_t                                                  op_M,
+               const level_hierarchy< value_t > &                                   M,
+               const uniform_vector_hierarchy< shared_cluster_basis< value_t > > &  x,
+               const scalar_vector< value_t > &                                     sx,
+               scalar_vector< value_t > &                                           sy,
+               const shared_cluster_basis_hierarchy< value_t > &                    rowcb )
+{
+    using  cb_t = shared_cluster_basis< value_t >;
+    
+    HLR_ASSERT( op_M == apply_normal );
+    
+    for ( uint  lvl = 0; lvl < M.nlevel(); ++lvl )
+    {
+        ::tbb::parallel_for< uint >(
+            0, M.row_ptr[lvl].size()-1,
+            [&,alpha,op_M,lvl] ( const uint  row )
+            {
+                const auto  lb = M.row_ptr[lvl][row];
+                const auto  ub = M.row_ptr[lvl][row+1];
+
+                if ( lb == ub )
+                    return;
+            
+                cb_t *      ycb    = nullptr;
+                auto        s      = blas::vector< value_t >();
+                const auto  row_is = M.row_mat[lvl][lb]->row_is( op_M );
+                auto        y_j    = blas::vector< value_t >( blas::vec( sy ), row_is - sy.ofs() );
+                auto        t_j    = blas::vector< value_t >( y_j.length() );
+                
+                for ( uint  j = lb; j < ub; ++j )
+                {
+                    auto  col_idx = M.col_idx[lvl][j];
+                    auto  mat     = M.row_mat[lvl][j];
+                    
+                    if ( matrix::is_uniform_lowrank( mat ) )
+                    {
+                        auto  R  = cptrcast( mat, uniform_lrmatrix< value_t > );
+                        auto  ux = x.hierarchy()[lvl][col_idx];
+                        
+                        if ( is_null( ycb ) )
+                        {
+                            ycb = rowcb.hierarchy()[lvl][row];
+                            s   = blas::vector< value_t >( ycb->rank() );
+                        }// if
+                        
+                        R->uni_apply_add( alpha, ux->coeffs(), s, op_M );
+                    }// if
+                    else if ( matrix::is_uniform_lowrank2( mat ) )
+                    {
+                        auto  R  = cptrcast( mat, uniform_lr2matrix< value_t > );
+                        auto  ux = x.hierarchy()[lvl][col_idx];
+                        
+                        if ( is_null( ycb ) )
+                        {
+                            ycb = rowcb.hierarchy()[lvl][row];
+                            s   = blas::vector< value_t >( ycb->rank() );
+                        }// if
+                        
+                        R->uni_apply_add( alpha, ux->coeffs(), s, op_M );
+                    }// if
+                    else if ( matrix::is_dense( mat ) )
+                    {
+                        auto  x_i = blas::vector< value_t >( blas::vec( sx ), mat->col_is( op_M ) - sx.ofs() );
+                        
+                        mat->apply_add( alpha, x_i, t_j, op_M );
+                    }// if
+                    else
+                        HLR_ERROR( "unsupported matrix type : " + mat->typestr() );
+                }// for
+
+                //
+                // add uniform part to y
+                //
+
+                if ( ! is_null( ycb ) )
+                    ycb->transform_backward( s, t_j );
+
+                blas::add( 1, t_j, y_j );
+            } );
+    }// for
+}
+
+//
+// construct mapping id -> clusterbasis
+//
+template < typename value_t >
+void
+build_id2cb ( shared_cluster_basis< value_t > &                   cb,
+              std::vector< shared_cluster_basis< value_t > * > &  idmap )
+{
+    HLR_ASSERT( cb.id() != -1 );
+    HLR_ASSERT( cb.id() < idmap.size() );
+
+    idmap[ cb.id() ] = & cb;
+
+    if ( cb.nsons() > 0 )
+    {
+        ::tbb::parallel_for< uint >(
+            0, cb.nsons(),
+            [&] ( const auto  i )
+            {
+                if ( ! is_null( cb.son( i ) ) )
+                    build_id2cb( * cb.son( i ), idmap );
+            } );
+    }// if
+}
+
+//
+// construct mapping cluster basis id (cluster) -> list of matrix blocks in M
+//
+template < typename value_t >
+void
+build_id2blocks ( const shared_cluster_basis< value_t > &                         cb,
+                  const Hpro::TMatrix< value_t > &                                M,
+                  std::vector< std::list< const Hpro::TMatrix< value_t > * > > &  blockmap,
+                  const bool                                                      transposed )
+{
+    HLR_ASSERT( cb.id() != -1 );
+    HLR_ASSERT( cb.id() < blockmap.size() );
+
+    if ( ! is_blocked( M ) )
+    {
+        blockmap[ cb.id() ].push_back( & M );
+    }// else
+    else
+    {
+        auto  op = ( transposed ? apply_transposed : apply_normal );
+        auto  B  = cptrcast( & M, Hpro::TBlockMatrix< value_t > );
+
+        HLR_ASSERT( B->nblock_rows( op ) == cb.nsons() );
+
+        for ( uint  i = 0; i < B->nblock_rows( op ); ++i )
+        {
+            auto  cb_i = cb.son( i );
+
+            HLR_ASSERT( ! is_null( cb_i ) );
+            
+            for ( uint  j = 0; j < B->nblock_cols( op ); ++j )
+            {
+                if ( ! is_null( B->block( i, j, op ) ) )
+                    build_id2blocks( *cb_i, * B->block( i, j, op ), blockmap, transposed );
+            }// for
+        }// if
+        // ::tbb::parallel_for(
+        //     ::tbb::blocked_range2d< size_t >( 0, B->nblock_rows( op ),
+        //                                       0, B->nblock_cols( op ) ),
+        //     [&,transposed,B] ( const auto &  r )
+        //     {
+        
+        //         for ( uint  i = r.rows().begin(); i != r.rows().end(); ++i )
+        //         {
+        //             auto  cb_i = cb.son( i );
+
+        //             HLR_ASSERT( ! is_null( cb_i ) );
+            
+        //             for ( uint  j = r.cols().begin(); j != r.cols().end(); ++j )
+        //             {
+        //                 if ( ! is_null( B->block( i, j ) ) )
+        //                     build_id2blocks( *cb_i, * B->block( i, j ), blockmap, transposed );
+        //             }// for
+        //         }// if
+        //     } );
+    }// else
+}
+
+template < typename value_t >
+void
+scalar_to_uniform ( const shared_cluster_basis< value_t > &   cb,
+                    const scalar_vector< value_t > &          v,
+                    std::vector< blas::vector< value_t > > &  vcoeff )
+{
+    ::tbb::parallel_invoke(
+        [&] ()
+        {                    
+            if ( cb.rank() > 0 )
+            {
+                auto  v_cb = blas::vector< value_t >( blas::vec( v ), cb.is() - v.ofs() );
+
+                HLR_ASSERT( cb.id() < vcoeff.size() );
+                
+                vcoeff[ cb.id() ] = std::move( cb.transform_forward( v_cb ) );
+            }// if
+        },
+
+        [&] ()
+        {
+            if ( cb.nsons() > 0 )
+            {
+                ::tbb::parallel_for( uint(0), cb.nsons(), [&] ( const uint  i ) { scalar_to_uniform( *cb.son(i), v, vcoeff ); } );
+            }// if
+        } );
+}
+
+template < typename value_t >
+void
+mul_vec_row ( const value_t                                                         alpha,
+              const Hpro::matop_t                                                   op_M,
+              const shared_cluster_basis< value_t > &                               rowcb,
+              const std::vector< shared_cluster_basis< value_t > * > &              colcb,
+              const std::vector< std::list< const Hpro::TMatrix< value_t > * > > &  blockmap,
+              const std::vector< blas::vector< value_t > > &                        xcoeff,
+              const scalar_vector< value_t > &                                      sx,
+              scalar_vector< value_t > &                                            sy )
+{
+    //
+    // perform matvec with all blocks in block row
+    //
+
+    auto &  blockrow = blockmap[ rowcb.id() ];
+
+    if ( blockrow.size() > 0 )
+    {
+        auto  rowis = rowcb.is();
+        auto  y_j   = blas::vector< value_t >( blas::vec( sy ), rowis - sy.ofs() );
+        auto  t_j   = blas::vector< value_t >( y_j.length() );
+        auto  s     = blas::vector< value_t >( rowcb.rank() );
+            
+        for ( auto  M : blockrow )
+        {
+            if ( matrix::is_uniform_lowrank( M ) )
+            {
+                auto    R       = cptrcast( M, matrix::uniform_lrmatrix< value_t > );
+                auto &  colcb_R = R->col_cb();
+                auto    ux      = xcoeff[ colcb_R.id() ];
+
+                R->uni_apply_add( alpha, ux, s, op_M );
+            }// if
+            else if ( matrix::is_uniform_lowrank2( M ) )
+            {
+                auto    R       = cptrcast( M, matrix::uniform_lr2matrix< value_t > );
+                auto &  colcb_R = R->col_cb();
+                auto    ux      = xcoeff[ colcb_R.id() ];
+
+                R->uni_apply_add( alpha, ux, s, op_M );
+            }// if
+            else if ( matrix::is_dense( M ) )
+            {
+                auto  x_i = blas::vector< value_t >( blas::vec( sx ), M->col_is( op_M ) - sx.ofs() );
+                        
+                M->apply_add( alpha, x_i, t_j, op_M );
+            }// if
+            else
+                HLR_ERROR( "unsupported matrix type : " + M->typestr() );
+        }// for
+
+        //
+        // add uniform part to y
+        //
+        
+        if ( s.length() > 0 )
+            rowcb.transform_backward( s, t_j );
+        
+        blas::add( value_t(1), t_j, y_j );
+    }// if
+
+    //
+    // recurse
+    //
+
+    if ( rowcb.nsons() > 0 )
+    {
+        ::tbb::parallel_for< uint >(
+            0, rowcb.nsons(),
+            [&] ( const auto  i )
+            {
+                if ( ! is_null( rowcb.son( i ) ) )
+                    mul_vec_row( alpha, op_M, * rowcb.son( i ), colcb, blockmap, xcoeff, sx, sy );
+            } );
+    }// if
+}
+
+//
+// multiply with column basis only
+//
+template < typename value_t >
+void
+mul_vec_col ( const shared_cluster_basis< value_t > &                               colcb,
+              const Hpro::matop_t                                                   op_M,
+              const std::vector< std::list< const Hpro::TMatrix< value_t > * > > &  colblocks,
+              const scalar_vector< value_t > &                                      sx,
+              std::vector< blas::vector< value_t > > &                              scoeff )
+{
+    auto &  blockcol = colblocks[ colcb.id() ];
+
+    ::tbb::parallel_invoke(
+        [&,op_M] ()
+        {
+            if ( blockcol.size() > 0 )
+            {
+                auto  colis = colcb.is();
+                auto  x_j   = blas::vector< value_t >( blas::vec( sx ), colis - sx.ofs() );
+                auto  u_j   = blas::vector< value_t >();
+            
+                for ( auto  M : blockcol )
+                {
+                    if ( matrix::is_uniform_lowrank2( M ) )
+                    {
+                        auto  R = cptrcast( M, matrix::uniform_lr2matrix< value_t > );
+                        auto  s = blas::vector< value_t >( R->rank() );
+
+                        // forward transformation if not yet done
+                        if ( u_j.length() == 0 )
+                            u_j = colcb.transform_forward( x_j );
+                    
+                        blas::mulvec( value_t(1), blas::adjoint( R->col_coupling( op_M ) ), u_j, value_t(0), s );
+                        scoeff[ R->id() ] = std::move( s );
+                    }// if
+                    else if ( matrix::is_dense( M ) )
+                    {
+                        // ignored
+                    }// if
+                    else if ( matrix::is_uniform_lowrank( M ) )
+                    {
+                        HLR_ERROR( "uniform_lrmatrix not supported" );
+                    }// if
+                    else
+                        HLR_ERROR( "unsupported matrix type : " + M->typestr() );
+                }// for
+            }// if
+        },
+
+        [&,op_M] ()
+        {
+            //
+            // recurse
+            //
+
+            if ( colcb.nsons() > 0 )
+            {
+                ::tbb::parallel_for< uint >(
+                    0, colcb.nsons(),
+                    [&,op_M] ( const auto  i )
+                    {
+                        if ( ! is_null( colcb.son( i ) ) )
+                            mul_vec_col( * colcb.son( i ), op_M, colblocks, sx, scoeff );
+                    } );
+            }// if
+        } );
+}
+
+template < typename value_t >
+void
+mul_vec_row ( const shared_cluster_basis< value_t > &                               rowcb,
+              const value_t                                                         alpha,
+              const Hpro::matop_t                                                   op_M,
+              const std::vector< std::list< const Hpro::TMatrix< value_t > * > > &  rowblocks,
+              const scalar_vector< value_t > &                                      sx,
+              // const scalar_vector< value_t > &                                      sy,
+              ::tbb::enumerable_thread_specific< blas::vector< value_t > > &        sy,
+              const std::vector< blas::vector< value_t > > &                        scoeff )
+{
+    ::tbb::parallel_invoke(
+        [&,op_M,alpha] ()
+        {
+            auto &  blockrow = rowblocks[ rowcb.id() ];
+
+            if ( blockrow.size() > 0 )
+            {
+                auto  rowis = rowcb.is();
+                auto  y_loc = sy.local();
+                auto  y_j   = blas::vector< value_t >( y_loc, rowis ); // actually: rowis - y_loc.ofs()
+                auto  u_j   = blas::vector< value_t >();
+                auto  t_j   = blas::vector< value_t >( y_j.length() );
+            
+                for ( auto  M : blockrow )
+                {
+                    if ( matrix::is_uniform_lowrank2( M ) )
+                    {
+                        auto  R = cptrcast( M, matrix::uniform_lr2matrix< value_t > );
+                        auto  s = scoeff[ R->id() ];
+
+                        if ( u_j.length() == 0 )
+                            u_j = blas::vector< value_t >( rowcb.rank() );
+                
+                        blas::mulvec( value_t(1), R->row_coupling( op_M ), s, value_t(1), u_j );
+                    }// if
+                    else if ( matrix::is_dense( M ) )
+                    {
+                        auto  x_i = blas::vector< value_t >( blas::vec( sx ), M->col_is( op_M ) - sx.ofs() );
+                        
+                        M->apply_add( value_t(1), x_i, t_j, op_M );
+                    }// if
+                    else if ( matrix::is_uniform_lowrank( M ) )
+                    {
+                        HLR_ERROR( "uniform_lrmatrix not supported" );
+                    }// if
+                    else
+                        HLR_ERROR( "unsupported matrix type : " + M->typestr() );
+                }// for
+
+                //
+                // add uniform part to y
+                //
+        
+                if ( u_j.length() > 0 )
+                    rowcb.transform_backward( u_j, t_j );
+        
+                blas::add( alpha, t_j, y_j );
+            }// if
+        },
+
+        [&,op_M,alpha] ()
+        {
+            //
+            // recurse
+            //
+
+            if ( rowcb.nsons() > 0 )
+            {
+                ::tbb::parallel_for< uint >(
+                    0, rowcb.nsons(),
+                    [&,op_M,alpha] ( const auto  i )
+                    {
+                        if ( ! is_null( rowcb.son( i ) ) )
+                            mul_vec_row( * rowcb.son( i ), alpha, op_M, rowblocks, sx, sy, scoeff );
+                    } );
+            }// if
+        } );
+}
+
+}}}}// namespace hlr::tbb::uniform::detail
+
+namespace hlr { namespace tbb { namespace uniform { namespace tlr { namespace detail {
+
+//
+// mat-vec : y = y + α op( M ) x
+//
+template < typename value_t >
+void
+mul_vec ( const value_t                                    alpha,
+          const Hpro::matop_t                              op_M,
+          const Hpro::TMatrix< value_t > &                 M,
+          const vector::scalar_vector< value_t > &         x,
+          vector::scalar_vector< value_t > &               y,
+          const matrix::shared_cluster_basis< value_t > &  rowcb,
+          const matrix::shared_cluster_basis< value_t > &  colcb )
+{
+    HLR_ASSERT( is_blocked( M ) );
+
+    auto  B = cptrcast( &M, Hpro::TBlockMatrix< value_t > );
+    
+    //
+    // construct uniform vector for x
+    //
+
+    const auto  nrowblocks = B->nblock_rows();
+    const auto  ncolblocks = B->nblock_cols();
+    auto        ux         = std::vector< blas::vector< value_t > >( ncolblocks );
+
+    ::tbb::parallel_for< size_t >(
+        0, ncolblocks,
+        [&,alpha,op_M] ( const auto  j )
+        {
+            auto  colcb_j = colcb.son( j );
+            
+            if ( colcb_j->rank() > 0 )
+            {
+                const auto  x_j = blas::vector< value_t >( blas::vec( x ), colcb_j->is() - x.ofs() );
+                
+                ux[j] = std::move( colcb_j->transform_forward( x_j ) );
+            }// if
+        } );
+        
+
+    //
+    // multiply while going over block rows
+    //   - collect updates in row (separate for uniform and dense)
+    //
+
+    ::tbb::parallel_for< size_t >(
+        0, nrowblocks,
+        [&,alpha,op_M] ( const auto  i )
+        {
+            auto  rowcb_i = rowcb.son( i );
+            auto  y_i     = blas::vector< value_t >( blas::vec( y ), rowcb_i->is() - y.ofs() );
+            auto  t_i     = blas::vector< value_t >( y_i.length() );
+            auto  s_i     = blas::vector< value_t >( rowcb_i->rank() );
+
+            for ( size_t  j = 0; j < ncolblocks; ++j )
+            {
+                auto  B_ij = B->block( i, j );
+
+                if ( hlr::matrix::is_uniform_lowrank( B_ij ) )
+                {
+                    auto  R = cptrcast( B_ij, hlr::matrix::uniform_lrmatrix< value_t > );
+
+                    #if defined(HLR_HAS_ZBLAS_DIRECT)
+                    if ( R->is_compressed() )
+                    {
+                        switch ( op_M )
+                        {
+                            case apply_normal     : compress::zblas::mulvec( R->row_rank(), R->col_rank(), op_M, alpha, R->zcoeff(), ux[j].data(), s_i.data() ); break;
+                            case apply_conjugate  : { HLR_ASSERT( false ); }
+                            case apply_transposed : { HLR_ASSERT( false ); }
+                            case apply_adjoint    : compress::zblas::mulvec( R->row_rank(), R->col_rank(), op_M, alpha, R->zcoeff(), ux[j].data(), s_i.data() ); break;
+                            default               : HLR_ERROR( "unsupported matrix operator" );
+                        }// switch
+                    }// if
+                    else
+                        #endif
+                    {
+                        switch ( op_M )
+                        {
+                            case apply_normal     : blas::mulvec( alpha, R->coupling(), ux[j], value_t(1), s_i ); break;
+                            case apply_conjugate  : HLR_ASSERT( false );
+                            case apply_transposed : HLR_ASSERT( false );
+                            case apply_adjoint    : blas::mulvec( alpha, blas::adjoint( R->coupling() ), ux[j], value_t(1), s_i ); break;
+                            default               : HLR_ERROR( "unsupported matrix operator" );
+                        }// switch
+                    }// else
+                }// if
+                else if ( hlr::matrix::is_dense( B_ij ) )
+                {
+                    auto  x_j = blas::vector< value_t >( blas::vec( x ), B_ij->col_is( op_M ) - x.ofs() );
+        
+                    B_ij->apply_add( alpha, x_j, t_i, op_M );
+                }// if
+                else
+                    HLR_ERROR( "unsupported matrix type: " + B_ij->typestr() );
+            }// for
+
+            //
+            // add uniform contribution to local result
+            //
+
+            if ( s_i.length() > 0 )
+            {
+                rowcb_i->transform_backward( s_i, t_i );
+            }// if
+
+            //
+            // add update to y
+            //
+
+            blas::add( value_t(1), t_i, y_i );
+        } );
+        
+}
+
+}}}}}// hlr::tbb::uniform::tlr::detail
+
+#endif // __HLR_TBB_ARITH_UNIFORM_MVM_HH

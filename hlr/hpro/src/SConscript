@@ -1,0 +1,223 @@
+#
+# SCons build script for HLIBpro; src subdirectory
+#
+
+from  os        import  remove
+from  os.path   import  join
+from  glob      import  glob
+
+#
+# get environment
+#
+
+Import( 'opt_env' )
+Import( 'hlibpro_env' )
+Import( 'avx_env' )
+Import( 'avx2_env' )
+Import( 'avx512_env' )
+Import( 'sse3_env' )
+Import( 'vsx_env' )
+Import( 'neon_env' )
+Import( 'mic_env' )
+
+env    = hlibpro_env.Clone()
+sse3   = sse3_env.Clone()
+avx    = avx_env.Clone()
+avx2   = avx2_env.Clone()
+avx512 = avx512_env.Clone()
+vsx    = vsx_env.Clone()
+neon   = neon_env.Clone()
+mic    = mic_env.Clone()
+
+#
+# local settings and adjustments for SIMD environments
+# 
+
+
+env.Append( CPPPATH = [ '#include', '#src/include' ] )
+
+for senv, flag in ( ( sse3,   'SSE3'    ),
+                    ( avx,    'AVX'     ),
+                    ( avx2,   'AVX2'    ),
+                    ( avx512, 'AVX512F' ),
+                    ( vsx,    'VSX'     ),
+                    ( neon,   'NEON'    ),
+                    ( mic,    'MIC'     ) ) :
+    isa_define = 'SIMD_ISA=ISA_' + flag
+    senv.Append( CPPPATH    = [ '#include', '#src/include' ] )
+    senv.Append( CPPDEFINES = [ isa_define ] )
+    if not opt_env['fullmsg'] :
+        senv.Replace(   CXXCOMSTR   = " C++    $SOURCES (%s)" % flag )
+        senv.Replace(   SHCXXCOMSTR = " C++    $SOURCES (%s)" % flag )
+    
+#
+# define sources
+#
+
+sources = [ 'base/String.cc',
+            'base/System.cc',
+            'base/TByteStream.cc',
+            'base/TPoint.cc',
+            'base/TStreamable.cc',
+            'base/TTruncAcc.cc',
+            'base/config.cc',
+            'base/error.cc',
+            'base/init.cc',
+
+            'bem/TBEMRHS.cc',
+            'bem/TConstEdgeFnSpace.cc',
+            'bem/TExpBF.cc',
+            'bem/TFnSpace.cc',
+            'bem/TGaussQuad.cc',
+            'bem/TGrid.cc',
+            'bem/THelmholtzBF.cc',
+            'bem/TInvarBasisQuadBEMBF.cc',
+            'bem/TLaplaceBF.cc',
+            'bem/TMassBF.cc',
+            'bem/TMaxwellBF.cc',
+            'bem/TMaxwellRHS.cc',
+            'bem/TQuadBEMBF.cc',
+            'bem/TQuadHCAGenFn.cc',
+            'bem/TRefinableGrid.cc',
+            'bem/TSauterTriQuad.cc',
+
+            'blas/Algebra.cc',
+            'blas/Matrix.cc',
+            'blas/cuda.cc',
+            'blas/hip.cc',
+            'blas/wrapper.f',
+
+            'cluster/TAlgAdmCond.cc',
+            'cluster/TAlgCTBuilder.cc',
+            'cluster/TAlgNDCTBuilder.cc',
+            'cluster/TBBox.cc',
+            'cluster/TBCBuilder.cc',
+            'cluster/TBSPCTBuilder.cc',
+            'cluster/TBSPPartStrat.cc',
+            'cluster/TBlockCluster.cc',
+            'cluster/TBSphere.cc',
+            'cluster/TBoundingVolume.cc',
+            'cluster/TChacoAlgPartStrat.cc',
+            'cluster/TCluster.cc',
+            'cluster/TCoordinate.cc',
+            'cluster/TGeomAdmCond.cc',
+            'cluster/TGraph.cc',
+            'cluster/THiLoFreqGeomAdmCond.cc',
+            'cluster/TMBLRCTBuilder.cc',
+            'cluster/TMETISAlgPartStrat.cc',
+            'cluster/TMongooseAlgPartStrat.cc',
+            'cluster/TPermutation.cc',
+            'cluster/TScotchAlgPartStrat.cc',
+            'cluster/TSFCCTBuilder.cc',
+
+            'io/baseio.cc',
+            'io/HBIO.cc',
+            'io/HproIO.cc',
+            'io/MatlabIO.cc',
+            'io/T2DPrinter.cc',
+            'io/TClusterVis.cc',
+            'io/TCoordIO.cc',
+            'io/TCoordVis.cc',
+            'io/TGridIO.cc',
+            'io/TGridVis.cc',
+            'io/TMatrixIO.cc',
+            'io/TPSPrinter.cc',
+            'io/TVectorIO.cc',
+
+            'matrix/TBlockMatrix.cc',
+            'matrix/TBSHMBuilder.cc',
+            'matrix/TDenseMatrix.cc',
+            'matrix/THMatrix.cc',
+            'matrix/TMatrix.cc',
+            'matrix/TMatrixHierarchy.cc',
+            'matrix/TMatrixProduct.cc',
+            'matrix/TMatrixSum.cc',
+            'matrix/TRkMatrix.cc',
+            'matrix/TSparseMatrix.cc',
+            'matrix/TUpdateAccumulator.cc',
+            'matrix/TZeroMatrix.cc',
+            'matrix/structure.cc',
+                    
+            'misc/TColourMap.cc',
+            'misc/TMaternCovCoeffFn.cc',
+            'misc/TMFitSched.cc',
+            'misc/TProgressBar.cc',
+            'misc/TRNG.cc',
+            'misc/colour.cc',
+
+            'parallel/NET.cc',
+            'parallel/TProcSet.cc',
+
+            'solver/TAutoSolver.cc',
+            'solver/TBiCGStab.cc',
+            'solver/TCG.cc',
+            'solver/TCGS.cc',
+            'solver/TGMRES.cc',
+            'solver/TKaczmarz.cc',
+            'solver/TLinearIteration.cc',
+            'solver/TMINRES.cc',
+            'solver/TSolver.cc',
+            'solver/TTFQMR.cc',
+
+            'vector/TBlockVector.cc',
+            'vector/TScalarVector.cc',
+            'vector/TVector.cc',
+            'vector/convert.cc' 
+            ]
+
+#
+# additional actions
+#
+
+subdirs = [ '.', 'algebra', 'bem', 'cluster', 'io', 'matrix', 'misc', 'parallel', 'solver', 'vector' ]
+
+if env.GetOption( 'clean' ):
+    # remove backup files
+    for dir in subdirs:
+        files = glob( dir + '/*~' )
+        for file in files:
+            remove( file )
+
+#
+# special SSE3/AVX/AVX2/MIC/AVX512/VSX/NEON actions
+#
+
+mach_obj = []
+
+for file in [ 'laplace', 'helmholtz', 'maxwell', 'exp' ] :
+    for ( isa_env, isa_name ) in [ [ sse3,   'sse2' ],   # files are SSE2, environment is SSE3
+                                   [ avx,    'avx'  ],
+                                   [ avx2,   'avx2' ],
+                                   [ avx512, 'avx512' ],
+                                   [ vsx,    'vsx' ],
+                                   [ neon,   'neon' ],
+                                   [ mic,    'mic'  ] ] :
+        obj = None
+        src = join( 'bem', ( '%s_simd.cc' % ( file ) ) )
+        if env['linktype'] == 'shared': 
+            obj = isa_env.SharedObject( target = join( 'bem', ( '%s_%s%s' % ( file, isa_name, env['SHOBJSUFFIX'] ) ) ), source = src )
+        else :
+            obj = isa_env.StaticObject( target = join( 'bem', ( '%s_%s%s' % ( file, isa_name, env['OBJSUFFIX']   ) ) ), source = src )
+        mach_obj.append( obj )
+
+#
+# library definition
+#
+
+if env['linktype'] == 'shared': 
+    hlibpro = env.SharedLibrary( 'hpro', sources + mach_obj )
+
+elif env['linktype'] == 'static': 
+    hlibpro = env.StaticLibrary( 'hpro', sources + mach_obj )
+
+#
+# installation
+#
+
+inst = env.Install( '#lib', hlibpro )
+
+#
+# make default
+#
+
+Default( [ hlibpro, inst ] )

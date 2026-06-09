@@ -1,0 +1,3214 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+#
+# automatic configuration and SConstruct creation
+#
+
+import os, os.path
+import sys
+import stat
+import platform
+import re
+import subprocess, shlex
+import string
+import urllib.request
+import tarfile
+import tempfile
+
+###############################################################
+###############################################################
+##
+## default settings
+##
+###############################################################
+###############################################################
+
+cache      = 'config.cache'
+logfile    = 'config.log'
+check      = True
+show       = False
+verbose    = 1
+contribdir = 'contrib'
+
+# compiler/library/function test data
+cconf    = { 'source'   : 'conftest.c',
+             'obj'      : 'conftest.o',
+             'prog'     : 'conftest' }
+
+cxxconf  = { 'source'   : 'conftest.C',
+             'obj'      : 'conftest.o',
+             'prog'     : 'conftest' }
+
+fconf    = { 'source'   : 'conftest.f',
+             'obj'      : 'conftest.o',
+             'prog'     : 'conftest' }
+
+# default compilation options
+compenv  = { 'LIBNAME'      : 'hpro',
+             'MAJVERSION'   : '3',
+             'MINVERSION'   : '1',
+             
+             'PREFIX'       : '.',
+             'OBJDIR'       : '',
+             'NET_TYPE'     : 'SEQ',
+             'HPRODEBUG'    : 'no',
+
+             #
+             # programs
+             #
+             
+             'CC'           : 'cc',
+             'CXX'          : 'c++',
+             'FC'           : 'f77',
+             
+             # 'USE_CPUFLAGS' : 'check',
+             # 'CPUFLAGS'     : 'bin/cpuflags',
+
+             'HAS_PKGCONFIG': 'check',
+             'PKGCONFIG'    : 'pkg-config',
+             
+             #
+             # compilation and linker flags
+             #
+
+             'DEFINES'      : '',
+             'NOOPT'        : '',
+             'CFLAGS'       : '',
+             'CXXFLAGS'     : '',
+             'FCFLAGS'      : '',
+             'LFLAGS'       : '-lm',
+             'ARCHFLAGS'    : '',
+             'DBGFLAGS'     : '-g -march=native',
+             'OPTFLAGS'     : '-O3 -fomit-frame-pointer -ffast-math -funroll-loops -march=native',
+             'PROFLAGS'     : '-pg',
+             
+             #
+             # libraries
+             #
+
+             'LAPACK_SRC'   : 'IGNORE',
+             'LAPACK_LIB'   : '-lflexiblas',
+             'LAPACK_BASE'  : '',
+
+             'BOOSTDIR'     : '',
+             'BOOSTCFLAGS'  : '-I@BOOSTDIR@/include',
+             'BOOSTLFLAGS'  : '-L@BOOSTDIR@/lib -lboost_filesystem -lboost_system -lboost_program_options',
+
+             'TBB'          : 'check',
+             'TBBDIR'       : '',
+             'TBBCFLAGS'    : '-I@TBBDIR@/include',
+             'TBBLFLAGS'    : '-L@TBBDIR@/lib -ltbb',
+
+             'ZLIB'         : 'check',
+             'ZLIBDIR'      : '',
+             'ZLIBCFLAGS'   : '-I@ZLIBDIR@/include',
+             'ZLIBLFLAGS'   : '-L@ZLIBDIR@/lib -lz',
+             
+             'METIS'        : 'check',
+             'METISDIR'     : '',
+             'METISCFLAGS'  : '-I@METISDIR@/include',
+             'METISLFLAGS'  : '-L@METISDIR@/lib -lmetis',
+             
+             'SCOTCH'       : 'check',
+             'SCOTCHDIR'    : '',
+             'SCOTCHCFLAGS' : '-I@SCOTCHDIR@/include',
+             'SCOTCHLFLAGS' : '-L@SCOTCHDIR@/lib -lscotch -lscotcherr',
+             
+             'CHACO'        : 'no',
+             'CHACODIR'     : '',
+             'CHACOLFLAGS'  : '-lchaco',
+
+             'MONGOOSE'       : 'check',
+             'MONGOOSEDIR'    : '',
+             'MONGOOSECFLAGS' : '-I@MONGOOSEDIR@/include -I@MONGOOSEDIR@/include/suitesparse',
+             'MONGOOSELFLAGS' : '-L@MONGOOSEDIR@/lib -lmongoose',
+             
+             'GSL'          : 'check',
+             'GSLCFLAGS'    : '$pkgconfig( --cflags gsl )$',
+             'GSLLFLAGS'    : '$pkgconfig( --libs gsl )$',
+             
+             'CAIRO'        : 'check',
+             'CAIROCFLAGS'  : '$pkgconfig( --cflags cairo-pdf )$',
+             'CAIROLFLAGS'  : '$pkgconfig( --libs cairo-pdf )$',
+
+             'HDF5'         : 'check',
+             'HDF5CFLAGS'   : '$pkgconfig( --cflags hdf5-serial )$',
+             'HDF5LFLAGS'   : '$pkgconfig( --libs hdf5-serial )$ -lhdf5_cpp',
+             
+             'NETCDF'       : 'check',
+             'NETCDFCFLAGS' : '$pkgconfig( --cflags netcdf )$',
+             'NETCDFLFLAGS' : '$pkgconfig( --libs netcdf )$',
+
+             'CGAL'         : 'check',
+             'CGALDIR'      : '',
+             'CGALCFLAGS'   : '-I@CGALDIR@/include',
+             
+             'AMDLIBM'      : 'check',
+             'AMDLIBMDIR'   : '',
+             'AMDLIBMLFLAGS': '-L@AMDLIBMDIR@/lib/static -lamdlibm',
+
+             'ACML'         : 'check',
+             'ACMLDIR'      : '',
+             'ACMLLFLAGS'   : '-L@ACMLDIR@/lib -lacml_mv',
+
+             'SVML'         : 'check',
+             'SVMLDIR'      : '',
+             'SVMLLFLAGS'   : '', # '-L@SVMLDIR/lib -lsvml',
+
+             'LIBMVEC'      : 'check',
+
+             'MKL'          : 'check',
+             'MKLDIR'       : '@MKLROOT@',
+             'MKLCFLAGS'    : '-I@MKLDIR@/include',
+             'MKLLFLAGS'    : '-L@MKLDIR@/lib/intel64 -lmkl_gf_lp64 -lmkl_sequential -lmkl_core -lm',
+             # 'MKLLFLAGS'    : '-L@MKLROOT@/lib/intel64 -lmkl_gf_lp64 -lmkl_tbb_thread -lmkl_core -lm -ltbb',
+             'MKL_SEQ'      : 'check',
+
+             'CUDA'         : 'check',
+             'CUDADIR'      : '@CUDA_ROOT@',
+             'CUDACFLAGS'   : '-I@CUDADIR@/include',
+             'CUDALFLAGS'   : '-L@CUDADIR@/lib64 -lcudart -lcublasLt -lcublas -lcusolver',
+
+             'HIP'         : 'check',
+             'HIPDIR'      : '/opt/rocm',
+             'HIPDEFINES'  : '-D__HIP_PLATFORM_AMD__', # for AMD GPUs
+             'HIPCFLAGS'   : '-I@HIPDIR@/include',
+             'HIPLFLAGS'   : '-L@HIPDIR@/lib -lhipsolver -lamdhip64',
+
+             'VAMPIRTRACE'  : 'no',
+             
+             #
+             # functions and features
+             #
+             
+             'HAS_CLOCKGETTIME'        : 'check',
+             'HAS_GETTIMEOFDAY'        : 'check',
+             'HAS_GETTICKCOUNT'        : 'check',
+             'HAS_GETPROCESSTIMES'     : 'check',
+             'HAS_LOCALTIME_R'         : 'check',
+             'HAS_GETRUSAGE'           : 'check',
+             'HAS_LWPINFO'             : 'check',
+
+             'HAS_GETPAGESIZE'         : 'check',
+             'HAS_MMAP'                : 'check',
+
+             'HAS_STRERROR_R'          : 'check',
+             'HAS_BACKTRACE'           : 'check',
+             'HAS_CXXDEMANGLE'         : 'check',
+
+             'HAS_UNORDERED_MAP'       : 'no',    # since C++11 is required, no check necessary
+             'HAS_BOOST_IOSTREAMS'     : 'check', # this is optional
+
+             'HAS_GEJSV'               : 'no',
+             'HAS_GESVJ'               : 'check',
+             'HAS_SINCOS'              : 'check',
+
+             'HAS_SSE2'                : 'check',
+             'HAS_SSE3'                : 'check',
+             'HAS_AVX'                 : 'check',
+             'HAS_AVX2'                : 'check',
+             'HAS_MIC'                 : 'check',
+             'HAS_AVX512F'             : 'check',
+             'HAS_VSX'                 : 'check',
+             'HAS_NEON'                : 'check',
+
+             'ILP64'                   : 'yes',
+
+             'HAS_C99COMPLEX'          : 'check',
+
+             'HAS_CPUID'               : 'check',
+             }
+
+# Linux options
+linux_env   = { 'CC'        : 'gcc',
+                'CXX'       : 'g++',
+                'FC'        : 'gfortran',
+                'DEFINES'   : '-DLINUX',
+                'LFLAGS'    : '-lm -lrt -lpthread',
+
+                'HAS_GETPROCESSTIMES'    : 'no',
+                'HAS_GETTICKCOUNT'       : 'no',
+                'HAS_LWPINFO'            : 'no',
+                }
+
+# SunOS/Solaris options
+sunos_env   = { 'CXX'        : 'CC',
+                'FC'         : 'f90',
+                'DEFINES'    : '-DSUNOS',
+                'LFLAGS'     : '-lrt -lm -lsunmath',
+                'THRCFLAGS'  : '-mt',
+                'THRLFLAGS'  : '-mt',
+                'LAPACK_LIB' : '-xlic_lib=sunperf',
+
+                'HAS_GETPROCESSTIMES'    : 'no',
+                'HAS_GETTICKCOUNT'       : 'no',
+                }
+
+# IBM AIX options
+aix_env     = { 'CC'        : 'xlc',
+                'CXX'       : 'xlC',
+                'FC'        : 'xlf',
+                'DEFINES'   : '-DAIX',
+
+                'HAS_GETPROCESSTIMES'    : 'no',
+                'HAS_GETTICKCOUNT'       : 'no',
+                'HAS_LWPINFO'            : 'no',
+                }
+
+# Compaq Tru64 options
+tru64_env   = { 'CXX'        : 'cxx',
+                'DEFINES'    : '-DTRU64',
+                'THRCFLAGS'  : '-pthread -D_REENTRANT',
+                'THRLFLAGS'  : '-pthread',
+                'LAPACK_LIB' : '-lcxml',
+
+                'HAS_GETPROCESSTIMES'    : 'no',
+                'HAS_GETTICKCOUNT'       : 'no',
+                'HAS_LWPINFO'            : 'no',
+                }
+
+# HP-UX options
+hpux_env    = { 'CXX'        : 'aCC -AA',
+                'DEFINES'    : '-DHPUX',
+                'THRCFLAGS'  : '-mt -D_REENTRANT',
+                'THRLFLAGS'  : '-mt -lpthread',
+                'LAPACK_LIB' : '-Wl,-aarchive_shared,-L/opt/mlib/lib/pa20_64 -llapack',
+
+                'HAS_GETPROCESSTIMES'    : 'no',
+                'HAS_GETTICKCOUNT'       : 'no',
+                'HAS_LWPINFO'            : 'no',
+                }
+
+# Darwin options
+darwin_env  = { 'CC'         : 'gcc',
+                'CXX'        : 'g++',
+                'FC'         : 'gfortran',
+                 
+                'DEFINES'    : '-DDARWIN',
+                'LFLAGS'     : '-lm',
+                'THRCFLAGS'  : '-D_REENTRANT',
+                'THRLFLAGS'  : '-lpthread',
+                'LAPACK_LIB' : '-Wl,-framework,Accelerate',
+
+                'HAS_GETPROCESSTIMES'    : 'no',
+                'HAS_GETTICKCOUNT'       : 'no',
+                'HAS_LWPINFO'            : 'no',
+                }
+
+# Windows options
+windows_env = { 'CC'        : 'cl /nologo',
+                'CXX'       : 'cl /nologo /EHsc',
+                
+                'DBGFLAGS'  : '/Zi',
+                'OPTFLAGS'  : '/Ox /fp:fast',
+                'DEFINES'   : '-DWINDOWS',
+                'LFLAGS'    : '',
+                'THRCFLAGS' : '',
+                'THRLFLAGS' : '',
+
+                'HAS_LWPINFO'            : 'no',
+                }
+
+#
+# terminal colour options
+# (N: normal, F: bold, R: red, G: green, B: blue)
+#
+tput = 'tput'
+tc   = { 'N' : '', 'F' : '', 'R' : '', 'G' : '', 'B' : '', 'Y' : '' , 'W' : '' }
+tmsg = { 'success' : 'ok',
+         'failure' : 'failed',
+         'hell'    : '.' }
+
+###############################################################
+###############################################################
+##
+## general functions
+##
+###############################################################
+###############################################################
+
+#
+# print usage informations
+#
+def usage ( status ):
+    """print usage informations"""
+    print( 'Usage: configure [OPTIONS]' )
+    print( 'Options:' )
+    print( '    -c | --check               check if specified tools and libraries really work' )
+    print( '    -n | --no-check            disable tool and library check' )
+    print( '    -f | --config <file>       set configuration file (default = config.cache)' )
+    print( '    -h | --help                print this usage information' )
+    print( '    -q | --quiet               be quiet while configuring' )
+    print( '    -s | --show                determine flags and show config without writing files' )
+    print( '    -v | --verbose             be verbose while configuring' )
+    print( '' )
+    print( '  Directories' )
+    print( '    --prefix=dir               prefix directory for installation' )
+    print( '' )
+    print( '  Library Type' )
+    print( '    --comm=type                inter process comm. support (type = SEQ,MPI,SHM)' )
+    print( '' )
+    print( '  Compilers and Tools' )
+    print( '    --cc=C-COMPILER            set C compiler to use' )
+    print( '    --cxx=C++-COMPILER         set C++ compiler to use' )
+    print( '    --fc=Fortran-COMPILER      set Fortran compiler to use' )
+    print( '' )
+    print( '  Compilation flags' )
+    print( '    --enable-FEATURE           enable FEATURE' )
+    print( '    --disable-FEATURE          disable FEATURE' )
+    print( '' )
+    print( '    --cflags=FLAGS             set C compilation flags (overwrite other flags)' )
+    print( '    --cxxflags=FLAGS           set C++ compilation flags (overwrite other flags)' )
+    print( '    --fcflags=FLAGS            set Fortran compilation flags (overwrite other flags)' )
+    print( '' )
+    print( '    --arch-flags=FLAGS         define architecture flags' )
+    print( '    --debug-flags=FLAGS        define debugging flags' )
+    print( '    --opt-flags=FLAGS          define optimisation flags' )
+    print( '    --profile-flags=FLAGS      define profile flags' )
+    print( '' )
+    print( '    --enable-debug             turn on additional debugging features' )
+    print( '    --enable-ilp64             use 64-bit integers for BLAS/LAPACK (default)' )
+    print( '' )
+    print( '  Optional libraries and tools' )
+    print( '    --with-LIBRARY             use LIBRARY (or tool)' )
+    print( '    --without-LIBRARY          do not use LIBRARY (or tool)' )
+    print( '' )
+    # print( '    --with-cpuflags[=path]     use cpuflags to determine CFLAGS/CXXFLAGS (default = off)' )
+    print( '    --lapack=LFLAGS            linking flags for LAPACK' )
+    print( '    --with-mkl=dir             set installation directory of Intel MKL' )
+    print( '      --mkl-cflags             flags to compile with Intel MKL' )
+    print( '      --mkl-lflags             flags to link with Intel MKL' )
+    print( '    --with-cuda=dir            set installation directory of NVidia CUDA' )
+    print( '      --cuda-cflags            flags to compile with NVidia CUDA' )
+    print( '      --cuda-lflags            flags to link with NVidia CUDA' )
+    print( '    --with-hip=dir            set installation directory of HIP' )
+    print( '      --hip-cflags            flags to compile with HIP' )
+    print( '      --hip-lflags            flags to link with HIP' )
+    print( '    --with-boost=dir           set installation directory of Boost (default = none)' )
+    print( '      --boost-cflags           flags to compile with boost' )
+    print( '      --boost-lflags           flags to link with boost' )
+    print( '    --with-zlib[=dir]          turn on/off usage of zlib with optional prefix "dir"' )
+    print( '      --zlib-cflags            flags to compile with zlib' )
+    print( '      --zlib-lflags            flags to link with zlib' )
+    print( '    --with-metis[=dir]         turn on/off usage of METIS with optional prefix "dir"' )
+    print( '      --metis-cflags           flags to compile with METIS' )
+    print( '      --metis-lflags           flags to link with METIS' )
+    print( '    --with-scotch[=dir]        turn on/off usage of Scotch with optional prefix "dir"' )
+    print( '      --scotch-cflags          flags to compile with Scotch' )
+    print( '      --scotch-lflags          flags to link with Scotch' )
+    print( '    --with-chaco[=dir]         turn on/off usage of Chaco with optional prefix "dir"' )
+    print( '      --chaco-lflags           flags to link with Chaco' )
+    print( '    --with-mongoose[=dir]      turn on/off usage of Mongoose with optional prefix "dir"' )
+    print( '      --mongoose-cflags        flags to compile with Mongoose' )
+    print( '      --mongoose-lflags        flags to link with Mongoose' )
+    print( '    --with-gsl                 turn on/off usage of GSL' )
+    print( '      --gsl-cflags             flags to compile with GSL' )
+    print( '      --gsl-lflags             flags to link with GSL' )
+    print( '    --with-hdf5                turn on/off usage of HDF5' )
+    print( '      --hdf5-cflags            flags to compile with HDF5' )
+    print( '      --hdf5-lflags            flags to link with HDF5' )
+    print( '    --with-netcdf              turn on/off usage of NetCDF' )
+    print( '      --netcdf-cflags          flags to compile with NetCDF' )
+    print( '      --netcdf-lflags          flags to link with NetCDF' )
+    print( '    --with-cgal[=dir]          turn on/off usage of CGAL with optional prefix "dir"' )
+    print( '      --cgal-cflags            flags to compile with CGAL' )
+    print( '    --with-amdlibm[=dir]       turn on/off usage of AMDLIBM with optional prefix "dir"' )
+    print( '      --amdlibm-cflags=lflags  flags to compile with AMDLIBM' )
+    print( '      --amdlibm-lflags=lflags  flags to link with AMDLIBM' )
+    print( '    --with-acml[=dir]          turn on/off usage of ACML with optional prefix "dir"' )
+    print( '      --acml-lflags=lflags     flags to link with ACML' )
+    
+    sys.exit( status )
+
+#
+# read commandline options
+#
+def parse_cmdline ( args, env ):
+    """Read command line parameters"""
+
+    global  cache, check, show, verbose
+
+    opts, args = getopt( args, [ [ '-c',                'none',     None ],
+                                 [ '--check',           'none',     None ],
+                                 [ '-n',                'none',     None ],
+                                 [ '--no-check',        'none',     None ],
+                                 [ '-f',                'required', '' ],
+                                 [ '--config',          'required', '' ],
+                                 [ '-h',                'none',     None ],
+                                 [ '--help',            'none',     None ],
+                                 [ '-q',                'none',     None ],
+                                 [ '--quiet',           'none',     None ],
+                                 [ '-s',                'none',     None ],
+                                 [ '--show',            'none',     None ],
+                                 [ '-v',                'optional', 1 ],
+                                 [ '--verbose',         'optional', 1 ],
+
+                                 [ '--prefix',          'required', env['PREFIX']  ],
+
+                                 [ '--cc',              'required', env['CC']  ],
+                                 [ '--cxx',             'required', env['CXX'] ],
+                                 [ '--fc',              'required', env['FC']  ],
+
+                                 [ '--cflags',          'required', env['CFLAGS'] ],
+                                 [ '--cxxflags',        'required', env['CXXFLAGS'] ],
+                                 [ '--fcflags',         'required', env['FCFLAGS'] ],
+                                 [ '--arch-flags',      'required', env['ARCHFLAGS'] ],
+                                 [ '--debug-flags',     'required', env['DBGFLAGS'] ],
+                                 [ '--opt-flags',       'required', env['OPTFLAGS'] ],
+                                 [ '--profile-flags',   'required', env['PROFLAGS'] ],
+
+                                 [ '--enable-debug',    'none',   None ],
+                                 [ '--disable-debug',   'none',   None ],
+
+                                 [ '--enable-single',   'none',     None ],
+                                 [ '--disable-single',  'none',     None ],
+
+                                 [ '--enable-double',   'none',     None ],
+                                 [ '--disable-double',  'none',     None ],
+
+                                 [ '--enable-ilp64',    'none',     None ],
+                                 [ '--disable-ilp64',   'none',     None ],
+
+                                 # [ '--with-cpuflags',    'optional', env['CPUFLAGS'] ],
+                                 # [ '--without-cpuflags', 'none',     None ],
+
+                                 [ '--with-boost',      'required', env['BOOSTDIR'] ],
+                                 [ '--boost-cflags',    'required', env['BOOSTCFLAGS'] ],
+                                 [ '--boost-lflags',    'required', env['BOOSTLFLAGS'] ],
+
+                                 [ '--with-zlib',       'optional', env['ZLIBDIR'] ],
+                                 [ '--without-zlib',    'none',     None ],
+                                 [ '--zlib-cflags',     'required', env['ZLIBCFLAGS'] ],
+                                 [ '--zlib-lflags',     'required', env['ZLIBLFLAGS'] ],
+
+                                 [ '--with-metis',      'optional', env['METISDIR'] ],
+                                 [ '--without-metis',   'none',     None ],
+                                 [ '--metis-cflags',    'required', env['METISCFLAGS'] ],
+                                 [ '--metis-lflags',    'required', env['METISLFLAGS'] ],
+
+                                 [ '--with-scotch',     'optional', env['SCOTCHDIR'] ],
+                                 [ '--without-scotch',  'none',     None ],
+                                 [ '--scotch-cflags',   'required', env['SCOTCHCFLAGS'] ],
+                                 [ '--scotch-lflags',   'required', env['SCOTCHLFLAGS'] ],
+
+                                 # [ '--with-chaco',      'optional', env['CHACODIR'] ],
+                                 # [ '--without-chaco',   'none',     None ],
+                                 # [ '--chaco-lflags',    'required', env['CHACOLFLAGS'] ],
+
+                                 [ '--with-mongoose',      'optional', env['MONGOOSEDIR'] ],
+                                 [ '--without-mongoose',   'none',     None ],
+                                 [ '--mongoose-cflags',    'required', env['MONGOOSECFLAGS'] ],
+                                 [ '--mongoose-lflags',    'required', env['MONGOOSELFLAGS'] ],
+
+                                 [ '--with-hdf5',      'none',     None ],
+                                 [ '--without-hdf5',   'none',     None ],
+                                 [ '--hdf5-cflags',    'required', env['HDF5CFLAGS'] ],
+                                 [ '--hdf5-lflags',    'required', env['HDF5LFLAGS'] ],
+
+                                 [ '--with-netcdf',      'none',     None ],
+                                 [ '--without-netcdf',   'none',     None ],
+                                 [ '--netcdf-cflags',    'required', env['NETCDFCFLAGS'] ],
+                                 [ '--netcdf-lflags',    'required', env['NETCDFLFLAGS'] ],
+
+                                 [ '--with-cgal',      'optional', env['CGALDIR'] ],
+                                 [ '--without-cgal',   'none',     None ],
+                                 [ '--cgal-cflags',    'required', env['CGALCFLAGS'] ],
+
+                                 [ '--with-amdlibm',    'optional', env['AMDLIBMDIR'] ],
+                                 [ '--without-amdlibm', 'none',     None ],
+                                 [ '--amdlibm-lflags',  'required', env['AMDLIBMLFLAGS'] ],
+
+                                 [ '--with-acml',       'optional', env['ACMLDIR'] ],
+                                 [ '--without-acml',    'none',     None ],
+                                 [ '--acml-lflags',     'required', env['ACMLLFLAGS'] ],
+
+                                 [ '--with-gsl',        'none',     None ],
+                                 [ '--without-gsl',     'none',     None ],
+                                 [ '--gsl-cflags',      'required', env['GSLCFLAGS'] ],
+                                 [ '--gsl-lflags',      'required', env['GSLLFLAGS'] ],
+
+                                 [ '--with-vtrace',     'none',     None ],
+                                 [ '--without-vtrace',  'none',     None ],
+
+                                 [ '--lapack',          'required', env['LAPACK_LIB'] ],
+
+                                 [ '--with-mkl',        'optional', env['MKLDIR'] ],
+                                 [ '--without-mkl',     'none',     None ],
+                                 [ '--mkl-cflags',      'required', env['MKLCFLAGS'] ],
+                                 [ '--mkl-lflags',      'required', env['MKLLFLAGS'] ],
+
+                                 [ '--with-cuda',       'optional', env['CUDADIR'] ],
+                                 [ '--without-cuda',    'none',     None ],
+                                 [ '--cuda-cflags',     'required', env['CUDACFLAGS'] ],
+                                 [ '--cuda-lflags',     'required', env['CUDALFLAGS'] ],
+
+                                 [ '--with-hip',        'optional', env['HIPDIR'] ],
+                                 [ '--without-hip',     'none',     None ],
+                                 [ '--hip-cflags',      'required', env['HIPCFLAGS'] ],
+                                 [ '--hip-lflags',      'required', env['HIPLFLAGS'] ],
+
+                                 [ '--with-libmvec',    'none',     None ],
+                                 [ '--without-libmvec', 'none',     None ],
+
+                                 ] )
+
+    for opt, arg in opts:
+
+        if opt in ( '-c', '--check' ):
+            check = True
+        elif opt in ( '-n', '--no-check' ):
+            check = False
+        elif opt in ( '-f', '--config' ):
+            cache = arg
+        elif opt in ( '-h', '--help' ):
+            usage( 0 )
+        elif opt in ( '-q', '--quiet' ):
+            verbose = 0
+        elif opt in ( '-s', '--show' ):
+            show = True
+        elif opt in ( '-v', '--verbose' ):
+            verbose = int( arg )
+
+
+        elif opt in ( '--prefix' ):
+            env['PREFIX'] = arg
+
+        elif opt in ( '--cc' ):
+            env['CC'] = arg
+        elif opt in ( '--cxx' ):
+            env['CXX'] = arg
+        elif opt in ( '--fc' ):
+            env['FC'] = arg
+
+
+        elif opt in ( '--cflags' ):
+            env['CFLAGS'] = arg
+        elif opt in ( '--cxxflags' ):
+            env['CXXFLAGS'] = arg
+        elif opt in ( '--fcflags' ):
+            env['FCFLAGS'] = arg
+        elif opt in ( '--arch-flags' ):
+            env['ARCHFLAGS'] = arg
+        elif opt in ( '--debug-flags' ):
+            env['DBGFLAGS'] = arg
+        elif opt in ( '--opt-flags' ):
+            env['OPTFLAGS'] = arg
+        elif opt in ( '--profile-flags' ):
+            env['PROFLAGS'] = arg
+
+
+        elif opt in ( '--enable-debug' ):
+            env['HPRODEBUG'] = 'yes'
+        elif opt in ( '--disable-debug' ):
+            env['HPRODEBUG'] = 'no'
+
+
+        elif opt in ( '--enable-ilp64' ):
+            env['ILP64'] = 'yes'
+        elif opt in ( '--disable-ilp64' ):
+            env['ILP64'] = 'no'
+
+
+        # elif opt in ( '--with-cpuflags' ):
+        #     env['USE_CPUFLAGS'] = 'yes'
+        #     env['CPUFLAGS']     = arg
+        # elif opt in ( '--without-cpuflags' ):
+        #     env['USE_CPUFLAGS'] = 'no'
+
+
+        elif opt in ( '--with-boost' ):
+            env['BOOSTDIR']    = arg
+            env['BOOSTCFLAGS'] = '-I@BOOSTDIR@/include ' + env['BOOSTCFLAGS']
+            env['BOOSTLFLAGS'] = '-L@BOOSTDIR@/lib '     + env['BOOSTLFLAGS']
+        elif opt in ( '--boost-cflags' ):
+            env['BOOSTCFLAGS'] = arg
+        elif opt in ( '--boost-lflags' ):
+            env['BOOSTLFLAGS'] = arg
+
+
+        elif opt in ( '--with-zlib' ):
+            env['ZLIB']    = 'yes'
+            env['ZLIBDIR'] = arg
+        elif opt in ( '--without-zlib' ):
+            env['ZLIB'] = 'no'
+        elif opt in ( '--zlib-cflags' ):
+            env['ZLIBCFLAGS'] = arg
+        elif opt in ( '--zlib-lflags' ):
+            env['ZLIBLFLAGS'] = arg
+
+
+        elif opt in ( '--with-metis' ):
+            env['METIS']    = 'yes'
+            env['METISDIR'] = arg
+        elif opt in ( '--without-metis' ):
+            env['METIS']    = 'no'
+        elif opt in ( '--metis-cflags' ):
+            env['METISCFLAGS'] = arg
+        elif opt in ( '--metis-lflags' ):
+            env['METISLFLAGS'] = arg
+
+
+        elif opt in ( '--with-scotch' ):
+            env['SCOTCH']    = 'yes'
+            env['SCOTCHDIR'] = arg
+        elif opt in ( '--without-scotch' ):
+            env['SCOTCH'] = 'no'
+        elif opt in ( '--scotch-cflags' ):
+            env['SCOTCHCFLAGS'] = arg
+        elif opt in ( '--scotch-lflags' ):
+            env['SCOTCHLFLAGS'] = arg
+
+
+        # elif opt in ( '--with-chaco' ):
+        #     env['CHACO']    = 'yes'
+        #     env['CHACODIR'] = arg
+        # elif opt in ( '--without-chaco' ):
+        #     env['CHACO']    = 'no'
+        # elif opt in ( '--chaco-lflags' ):
+        #     env['CHACOLFLAGS'] = arg
+
+
+        elif opt in ( '--with-mongoose' ):
+            env['MONGOOSE']    = 'yes'
+            env['MONGOOSEDIR'] = arg
+        elif opt in ( '--without-mongoose' ):
+            env['MONGOOSE']    = 'no'
+        elif opt in ( '--mongoose-cflags' ):
+            env['MONGOOSECFLAGS'] = arg
+        elif opt in ( '--mongoose-lflags' ):
+            env['MONGOOSELFLAGS'] = arg
+
+
+        elif opt in ( '--with-gsl' ):
+            env['GSL'] = 'yes'
+        elif opt in ( '--without-gsl' ):
+            env['GSL'] = 'no'
+        elif opt in ( '--gsl-cflags' ):
+            env['GSLCFLAGS'] = arg
+        elif opt in ( '--gsl-lflags' ):
+            env['GSLLFLAGS'] = arg
+
+
+        elif opt in ( '--with-hdf5' ):
+            env['HDF5'] = 'yes'
+        elif opt in ( '--without-hdf5' ):
+            env['HDF5'] = 'no'
+        elif opt in ( '--hdf5-cflags' ):
+            env['HDF5CFLAGS'] = arg
+        elif opt in ( '--hdf5-lflags' ):
+            env['HDF5LFLAGS'] = arg
+
+
+        elif opt in ( '--with-netcdf' ):
+            env['NETCDF'] = 'yes'
+        elif opt in ( '--without-netcdf' ):
+            env['NETCDF'] = 'no'
+        elif opt in ( '--netcdf-cflags' ):
+            env['NETCDFCFLAGS'] = arg
+        elif opt in ( '--netcdf-lflags' ):
+            env['NETCDFLFLAGS'] = arg
+
+
+        elif opt in ( '--with-cgal' ):
+            env['CGAL'] = 'yes'
+            env['CGALDIR'] = arg
+        elif opt in ( '--without-cgal' ):
+            env['CGAL'] = 'no'
+        elif opt in ( '--cgal-cflags' ):
+            env['CGALCFLAGS'] = arg
+
+
+        elif opt in ( '--with-vtrace' ):
+            env['VAMPIRTRACE'] = 'yes'
+        elif opt in ( '--without-vtrace' ):
+            env['VAMPIRTRACE'] = 'no'
+
+
+        elif opt in ( '--with-amdlibm' ):
+            env['AMDLIBM']    = 'yes'
+            env['AMDLIBMDIR'] = arg
+        elif opt in ( '--without-amdlibm' ):
+            env['AMDLIBM'] = 'no'
+        elif opt in ( '--amdlibm-lflags' ):
+            env['AMDLIBMLFLAGS'] = arg
+
+
+        elif opt in ( '--with-acml' ):
+            env['ACML']    = 'yes'
+            env['ACMLDIR'] = arg
+        elif opt in ( '--without-acml' ):
+            env['ACML'] = 'no'
+        elif opt in ( '--acml-lflags' ):
+            env['ACMLLFLAGS'] = arg
+
+
+        elif opt in ( '--lapack' ):
+            env['LAPACK_LIB']  = arg
+            env['LAPACK_SRC']  = 'LOCAL'
+
+            
+        elif opt in ( '--with-mkl' ):
+            env['MKLDIR'] = arg
+            env['MKL']    = 'check'
+        elif opt in ( '--without-mkl' ):
+            env['MKL']    = 'no'
+        elif opt in ( '--mkl-cflags' ):
+            env['MKLCFLAGS'] = arg
+        elif opt in ( '--mkl-lflags' ):
+            env['MKLLFLAGS'] = arg
+
+            
+        elif opt in ( '--with-cuda' ):
+            env['CUDADIR'] = arg
+            env['CUDA']    = 'check'
+        elif opt in ( '--without-cuda' ):
+            env['CUDA']    = 'no'
+        elif opt in ( '--cuda-cflags' ):
+            env['CUDACFLAGS'] = arg
+        elif opt in ( '--cuda-lflags' ):
+            env['CUDALFLAGS'] = arg
+
+            
+        elif opt in ( '--with-hip' ):
+            env['HIPDIR'] = arg
+            env['HIP']    = 'check'
+        elif opt in ( '--without-hip' ):
+            env['HIP']    = 'no'
+        elif opt in ( '--hip-cflags' ):
+            env['HIPCFLAGS'] = arg
+        elif opt in ( '--hip-lflags' ):
+            env['HIPLFLAGS'] = arg
+
+            
+        elif opt in ( '--with-libmvec' ):
+            env['LIBMVEC'] = 'check'
+        elif opt in ( '--without-libmvec' ):
+            env['LIBMVEC'] = 'no'
+
+
+    # adjust prefix directory
+    if env['PREFIX'] == '.': 
+        env['PREFIX'] = os.getcwd()
+
+#
+# print content of environment
+#
+def print_env ( env ):
+    """Print compilation environment"""
+
+    def print_bold ( name, val, flags = '' ):
+        """Format name and value for environment printing"""
+        if val != '' and val != None:
+            if flags != '' :
+                print( bold( '%-12s' % name ) + ' = ' + val + ( '   (%s)' % flags ) )
+            else :
+                print( bold( '%-12s' % name ) + ' = ' + val )
+
+    print_bold( 'PREFIX',     env['PREFIX'] )
+
+    print( '' )
+    print_bold( 'CC',   env['CC'] )
+    print_bold( 'CXX',  env['CXX'] )
+    print_bold( 'FC',   env['FC'] )
+
+    print( '' )
+    print_bold( 'DEFINES',  env['DEFINES'] )
+    print_bold( 'CFLAGS',   env['CFLAGS'] )
+    print_bold( 'CXXFLAGS', env['CXXFLAGS'] )
+    print_bold( 'FCFLAGS',  env['FCFLAGS'] )
+    print_bold( 'OPTFLAGS', env['OPTFLAGS'] )
+    print_bold( 'LFLAGS',   env['LFLAGS'] )
+
+    # if env['USE_CPUFLAGS'] == 'yes':
+    #     print( '' )
+    #     print_bold( 'CPUFLAGS', env['CPUFLAGS'] )
+
+    print( '' ) 
+    print_bold( 'LAPACK', env['LAPACK_LIB'] )
+    if env['ILP64'] == 'yes':
+        print_bold( 'ILP64', 'yes' )
+
+    if env['CUDA'] == 'yes':
+        if verbose > 1:
+            print_bold( 'CUDA',       'yes' )
+            print_bold( 'CUDADIR',    env['CUDADIR'] )
+            print_bold( 'CUDACFLAGS', env['CUDACFLAGS'] )
+            print_bold( 'CUDALFLAGS', env['CUDALFLAGS'] )
+        else :
+            print_bold( 'CUDA', 'yes', env['CUDACFLAGS'] + ' ' + env['CUDALFLAGS'] )
+
+    if env['HIP'] == 'yes':
+        if verbose > 1:
+            print_bold( 'HIP',       'yes' )
+            print_bold( 'HIPDIR',    env['HIPDIR'] )
+            print_bold( 'HIPCFLAGS', env['HIPCFLAGS'] )
+            print_bold( 'HIPLFLAGS', env['HIPLFLAGS'] )
+        else :
+            print_bold( 'HIP', 'yes', env['HIPCFLAGS'] + ' ' + env['HIPLFLAGS'] )
+
+    print( '' ) 
+
+    if env['BOOSTDIR'] != '':
+        print_bold( 'BOOSTDIR',    env['BOOSTDIR'] )
+
+        if verbose > 1:
+            print_bold( 'BOOSTCFLAGS', env['BOOSTCFLAGS'] )
+            print_bold( 'BOOSTLFLAGS', env['BOOSTLFLAGS'] )
+
+    if env['ZLIB'] == 'yes':
+        if verbose > 1:
+            print_bold( 'ZLIB',       'yes' )
+            print_bold( 'ZLIBDIR',    env['ZLIBDIR'] )
+            print_bold( 'ZLIBCFLAGS', env['ZLIBCFLAGS'] )
+            print_bold( 'ZLIBLFLAGS', env['ZLIBLFLAGS'] )
+        else :
+            print_bold( 'ZLIB', 'yes', env['ZLIBCFLAGS'] + ' ' + env['ZLIBLFLAGS'] )
+
+    if env['METIS'] == 'yes':
+        if verbose > 1:
+            print_bold( 'METIS',       'yes' )
+            print_bold( 'METISDIR',    env['METISDIR'] )
+            print_bold( 'METISCFLAGS', env['METISCFLAGS'] )
+            print_bold( 'METISLFLAGS', env['METISLFLAGS'] )
+        else :
+            print_bold( 'METIS', 'yes', env['METISCFLAGS'] + ' ' + env['METISLFLAGS'] )
+
+    if env['SCOTCH'] == 'yes':
+        if verbose > 1:
+            print_bold( 'Scotch',       'yes' )
+            print_bold( 'SCOTCHDIR',    env['SCOTCHDIR'] )
+            print_bold( 'SCOTCHCFLAGS', env['SCOTCHCFLAGS'] )
+            print_bold( 'SCOTCHLFLAGS', env['SCOTCHLFLAGS'] )
+        else :
+            print_bold( 'Scotch', 'yes', env['SCOTCHCFLAGS'] + ' ' + env['SCOTCHLFLAGS'] )
+
+    # if env['CHACO'] == 'yes':
+    #     if verbose > 1:
+    #         print_bold( 'Chaco', 'yes' )
+    #         print_bold( 'CHACODIR',    env['CHACODIR'] )
+    #         print_bold( 'CHACOLFLAGS', env['CHACOLFLAGS'] )
+    #     else :
+    #         print_bold( 'Chaco', 'yes', env['CHACOLFLAGS'] )
+
+    if env['MONGOOSE'] == 'yes':
+        if verbose > 1:
+            print_bold( 'MONGOOSE',       'yes' )
+            print_bold( 'MONGOOSEDIR',    env['MONGOOSEDIR'] )
+            print_bold( 'MONGOOSECFLAGS', env['MONGOOSECFLAGS'] )
+            print_bold( 'MONGOOSELFLAGS', env['MONGOOSELFLAGS'] )
+        else :
+            print_bold( 'MONGOOSE', 'yes', env['MONGOOSECFLAGS'] + ' ' + env['MONGOOSELFLAGS'] )
+
+    if env['GSL'] == 'yes':
+        if verbose > 1:
+            print_bold( 'GSL', 'yes' )
+            print_bold( 'GSLCFLAGS', env['GSLCFLAGS'] )
+            print_bold( 'GSLLFLAGS', env['GSLLFLAGS'] )
+        else :
+            print_bold( 'GSL', 'yes', env['GSLCFLAGS'] + ' ' + env['GSLLFLAGS'] )
+
+    if env['HDF5'] == 'yes':
+        if verbose > 1:
+            print_bold( 'HDF5', 'yes' )
+            print_bold( 'HDF5CFLAGS', env['HDF5CFLAGS'] )
+            print_bold( 'HDF5LFLAGS', env['HDF5LFLAGS'] )
+        else :
+            print_bold( 'HDF5', 'yes', env['HDF5CFLAGS'] + ' ' + env['HDF5LFLAGS'] )
+
+    if env['NETCDF'] == 'yes':
+        if verbose > 1:
+            print_bold( 'NETCDF', 'yes' )
+            print_bold( 'NETCDFCFLAGS', env['NETCDFCFLAGS'] )
+            print_bold( 'NETCDFLFLAGS', env['NETCDFLFLAGS'] )
+        else :
+            print_bold( 'NETCDF', 'yes', env['NETCDFCFLAGS'] + ' ' + env['NETCDFLFLAGS'] )
+
+    if env['CGAL'] == 'yes':
+        if verbose > 1:
+            print_bold( 'CGAL', 'yes' )
+            print_bold( 'CGALDIR',    env['CGALDIR'] )
+            print_bold( 'CGALCFLAGS', env['CGALCFLAGS'] )
+        else :
+            print_bold( 'CGAL', 'yes', env['CGALCFLAGS'] )
+
+    if env['AMDLIBM'] == 'yes':
+        if verbose > 1:
+            print_bold( 'AMDLIBM', 'yes' )
+            print_bold( 'AMDLIBMDIR',    env['AMDLIBMDIR'] )
+            print_bold( 'AMDLIBMLFLAGS', env['AMDLIBMLFLAGS'] )
+        else :
+            print_bold( 'AMDLIBM', 'yes', env['AMDLIBMLFLAGS'] )
+
+    if env['ACML'] == 'yes':
+        if verbose > 1:
+            print_bold( 'ACML', 'yes' )
+            print_bold( 'ACMLDIR',    env['ACMLDIR'] )
+            print_bold( 'ACMLLFLAGS', env['ACMLLFLAGS'] )
+        else :
+            print_bold( 'ACML', 'yes', env['ACMLLFLAGS'] )
+
+#
+# return first line of output of given program
+#
+def readln ( prog ):
+    text = ''
+
+    try :
+        file = os.popen( prog, 'r' )
+        text = file.readline()
+        file.close()
+    except :
+        pass
+
+    return text
+
+#
+# open logfile and return handle
+#
+def open_log ( truncate = False ) :
+    opt = "w"
+    if truncate == False :
+        opt = "a"
+        
+    return open( logfile, opt )
+    
+#
+# clear log file
+#
+def clear_log () :
+    log = open_log( truncate = True )
+    log.close()
+    
+#
+# print string unbuffered
+#
+def print_unbuf ( str ) :
+    print( str, end = '' )
+    sys.stdout.flush()
+
+#
+# init colour output
+#
+def init_colours ( env ):
+    unic = False
+    
+    if get_system() != 'Windows':
+        nc = int( readln( tput + ' colors' ) )
+
+        if nc >= 8:
+            tc['N'] = readln( tput + ' sgr0' )
+            tc['F'] = readln( tput + ' bold' )
+            tc['R'] = readln( tput + ' setaf 1' ) + tc['F']
+            tc['G'] = readln( tput + ' setaf 2' ) + tc['F']
+            tc['Y'] = readln( tput + ' setaf 3' ) + tc['F']
+            tc['B'] = readln( tput + ' setaf 4' ) + tc['F']
+            tc['W'] = readln( tput + ' setaf 7' ) + tc['F']
+
+        term = os.environ['TERM']
+
+        if term != None and sys.stdout.encoding == 'utf-8' :
+            if term in [ 'xterm', 'xterm-256color', 'rxvt-unicode' ] :
+                unic = True
+
+
+    if unic :
+        tmsg['success'] = green( '✔' )
+        tmsg['failure'] = red( '✘' )
+        tmsg['hell']    = '…'
+    else :
+        tmsg['success'] = green( 'ok' )
+        tmsg['failure'] = red( 'failed' )
+        tmsg['hell']    = '.'
+        
+                
+#
+# terminal colours and formats
+#
+def bold   ( str ): return tc['F'] + str + tc['N']
+def red    ( str ): return tc['R'] + str + tc['N']
+def green  ( str ): return tc['G'] + str + tc['N']
+def yellow ( str ): return tc['Y'] + str + tc['N']
+def blue   ( str ): return tc['B'] + str + tc['N']
+def white  ( str ): return tc['W'] + str + tc['N']
+
+#
+# replace <item> by <rpl> in <str>
+#
+def replace ( str, item, rpl ) :
+    return str.replace( item, rpl )
+
+    # lb = str.find( item )
+    # if lb >= 0 :
+    #     ub = lb + len( item )
+    #     return str[:lb] + rpl + str[ub:]
+    # else :
+    #     return str
+
+#
+# read contents of cachefile into environment
+#
+def read_cache ( env ):
+    if os.path.exists( cache ):
+        f        = open( cache, 'r' )
+        p_assign = re.compile( r'(.*) = (.*)' )
+        p_ws     = re.compile( r'(^ *| *$)' )
+
+        for line in f:
+            line = re.sub( '\n', '', line )
+
+            m = p_assign.search( line )
+            if m != None:
+                key = m.group(1)
+                val = m.group(2)
+
+                key = p_ws.sub( '', key )
+                val = p_ws.sub( '', val )
+
+            env[key] = val
+        
+        f.close()
+
+#
+# write the changed content of environment
+#
+def write_cache ( env, origenv ):
+    f = open( cache, 'w' )
+
+    for key, val in env.items():
+        if val == None:
+            val = ''
+        if key in origenv and origenv[key] != env[key]:
+            f.write( key + ' = ' + val + '\n' )
+            
+    f.close()
+
+#
+# use Makefile.in as template and replace @variables
+#
+def write_makefile ( tmpl, make, env ) :
+
+    if not os.stat( tmpl ):
+        print( 'could not open ' + tmpl )
+        return
+
+    if verbose >= 1: print( 'Writing  ' + bold( make ) )
+
+    try :
+        fin  = open( tmpl, 'r' );
+        fout = open( make, 'w' );
+
+        at_re = re.compile( r'@(.*?)@' )
+
+        for line in fin:
+            # replace @variables@ by content in environment
+            for entry in at_re.findall( line ):
+                if entry in env:
+                    if env[entry] == None: subst = ''
+                    else :                 subst = env[entry]
+                    line = re.sub( '@' + entry + '@', subst , line )
+
+            fout.write( line )
+
+        fin.close()
+        fout.close()
+    except IOError as e:
+        print( 'error while writing ' + bold( make ) + ' : ' + red( str( e ) ) )
+
+#
+# same as above, but make the final file executable
+#
+def write_script ( tmpl, script, env ):
+
+    write_makefile( tmpl, script, env )
+
+    # make script executable
+    if get_system() != 'Windows':
+        os.chmod( script, os.stat( script )[stat.ST_MODE] | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH )
+
+#
+# replace @variable by content
+#
+def expand ( entry, env ):
+    changed = True
+    
+    #
+    # first replace all @occurences
+    #
+
+    while changed:
+        changed = False
+        
+        m = re.search( r'@([a-zA-Z]+[a-zA-Z0-9_]*)@', entry )
+        if m != None:
+            key     = m.group(1)
+            val     = ''
+
+            if key in env :
+                val = env[key]
+            elif key in os.environ :
+                val = os.environ[key]
+            else :
+                print( 'unknown config key "' + key + '"' )
+                val = ""
+                # sys.exit( 1 );
+
+            entry   = re.sub( '@'+key+'@', val, entry )
+            changed = True
+
+        m = re.search( r'\$(.+?)\((.+?)\)\$', entry )
+        if m != None:
+            prog = m.group(1)
+            parg = m.group(2)
+
+            if prog == 'pkgconfig' :
+                if env['HAS_PKGCONFIG'] == 'yes' :
+                    try :
+                        val     = pkgconfig( env['PKGCONFIG'], parg )
+                        entry   = replace( entry, '$' + prog + '(' + parg + ')$', val )
+                        changed = True
+                    except PkgConfigError as e:
+                        pass
+                    except Exception as e:
+                        print( str(e) )
+                        pass
+                else :
+                    # remove pkgconfig entry
+                    entry   = replace( entry, '$' + prog + '(' + parg + ')$', '' )
+                    changed = True
+
+    return entry
+
+#
+# tidy up various entries in compenv
+#
+def tidy_compenv ( env ) :
+
+    def remove_duplicates ( string, prefix ) :
+        output      = ''
+        string_list = string.split( ' ' )
+        string_seen = set( [] )
+        for item in string_list :
+            if item.startswith( prefix ) :
+                if item not in string_seen :
+                    string_seen.add( item )
+                    output = output + ' ' + item
+            else :
+                output = output + ' ' + item
+            
+        return output
+
+    env['CFLAGS']   = remove_duplicates( env['CFLAGS'], '-I' )
+    env['CXXFLAGS'] = remove_duplicates( env['CXXFLAGS'], '-I' )
+    env['LFLAGS']   = remove_duplicates( env['LFLAGS'], '-L' )
+
+    # remove -I/include, -L/lib and multiple whitespaces
+    for key in env :
+        env[key] = replace( env[key], '-I/include', '' )
+        env[key] = replace( env[key], '-L/lib', '' )
+        env[key] = re.sub( ' +', ' ', env[key] )
+        env[key] = re.sub( '^ +', '', env[key] )
+        env[key] = re.sub( ' +$', '', env[key] )
+        
+    # env['CFLAGS']   = replace( env['CFLAGS'],   '-I/include', '' )
+    # env['CXXFLAGS'] = replace( env['CXXFLAGS'], '-I/include', '' )
+    # env['LFLAGS']   = replace( env['LFLAGS'],   '-L/lib',     '' )
+
+    # remove multiple whitespaces
+    # env['CFLAGS']   = re.sub( ' +', ' ', env['CFLAGS'] )
+    # env['CXXFLAGS'] = re.sub( ' +', ' ', env['CXXFLAGS'] )
+    # env['LFLAGS']   = re.sub( ' +', ' ', env['LFLAGS'] )
+    
+    return env
+        
+    
+#
+# replace all @variables by their contents
+#
+def expand_env ( env ):
+    for key,val in env.items():
+        if val != None:
+            env[key] = expand( val, env )
+
+#
+# return operating system
+#             
+def get_system ():
+    system = platform.system()
+    if system in ( 'Microsoft', 'MSWin32', 'MSWin64' ):
+        system = 'Windows'
+    return system
+
+#
+# determine compiler and return C++ libs
+#
+def detect_cxx_libs ( compiler ):
+
+    cxxlibs = { 'gcc'       : '-lstdc++',
+                'icc'       : '-lstdc++',
+                'pathcc'    : '-lstl -lcxxrt',
+                'pgi'       : '',
+                'suncc'     : '-lCstd -lCrun -lrt',
+                'xlc'       : '-lC',
+                'acc'       : '',
+                'compaqcc'  : '',
+                'mipscc'    : '',
+                'msvc'      : '',
+                'default'   : '',
+                }
+
+    options = ( '-v', '-V', '--version', '-qversion' )
+    
+    gcc_re      = re.compile( r'^(gcc|g\+\+).* (\d+)\.(\d+)', re.I )
+    icc_re      = re.compile( r'(intel.*compiler.*version.* (\d+)\.(\d+))|(icc \(ICC\).*(\d+)\.(\d+))', re.I )
+    pgi_re      = re.compile( r'pg(cc|CC|f77|f90) (\d+)\.(\d+)', re.I )
+    pathcc_re   = re.compile( r'PathScale.* Version (\d+)\.(\d+)', re.I )
+    suncc_re    = re.compile( r'(forte developer .* c\+* (\d+)\.(\d+))|(sun workshop .* c\+* (\d+)\.(\d+))|(sun c\+* (\d+)\.(\d+))', re.I )
+    acc_re      = re.compile( r'hp.*ansi.*a\.(\d+)', re.I )
+    mipscc_re   = re.compile( r'mipspro compilers.* (\d+)\.(\d+)', re.I )
+    xlc_re      = re.compile( r'(IBM XL .* Version (\d+)\.(\d+))|(IBM XL .* Edition V(\d+)\.(\d+))|(C for AIX version (\d+)\.(\d+))', re.I )
+    compaqcc_re = re.compile( r'Compaq C V(\d+)\.(\d+)', re.I )
+    msvc_re     = re.compile( r'Microsoft .* C\/C\+\+ .* Version (\d+)\.(\d+)', re.I )
+    
+    for opt in options:
+        try :
+            prog    = compiler + ' ' + opt
+            process = subprocess.Popen( shlex.split( prog ), stdout=subprocess.PIPE, stderr=subprocess.PIPE )
+            process.wait()
+
+            for file in ( process.stdout, process.stderr ):
+                for iline in file:
+
+                    line = iline.decode()
+
+                    if   gcc_re.search(      line ) != None: return cxxlibs['gcc']
+                    elif icc_re.search(      line ) != None: return cxxlibs['icc']
+                    elif pgi_re.search(      line ) != None: return cxxlibs['pgi']
+                    elif pathcc_re.search(   line ) != None: return cxxlibs['pathcc']
+                    elif suncc_re.search(    line ) != None: return cxxlibs['suncc']
+                    elif acc_re.search(      line ) != None: return cxxlibs['acc']
+                    elif mipscc_re.search(   line ) != None: return cxxlibs['mipscc']
+                    elif xlc_re.search(      line ) != None: return cxxlibs['xlc']
+                    elif compaqcc_re.search( line ) != None: return cxxlibs['compaqcc']
+                    elif msvc_re.search(     line ) != None: return cxxlibs['msvc']
+                
+        except Exception as e :
+            print( str(e) )
+            pass
+
+    return ''
+
+#
+# determine Fortran compiler and return Fortran libs
+#
+def detect_fortran_libs ( compiler ):
+
+    fortran_libs = { 'gfortran'  : '-lgfortran',
+                     'ifort'     : '-lifcore -lirc -limf -lsvml -ldl',
+                     'default'   : '',
+                     }
+
+    options = ( '-v', '-V', '--version', '-qversion' )
+    
+    gcc_re   = re.compile( r'^(gcc|g\+\+).* (\d+)\.(\d+)', re.I )
+    ifort_re = re.compile( r'(intel.*compiler.*version.* (\d+)\.(\d+))|(icc \(ICC\).*(\d+)\.(\d+))', re.I )
+    
+    for opt in options:
+        try :
+            prog    = compiler + ' ' + opt
+            process = subprocess.Popen( prog.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE )
+            process.wait()
+
+            for file in ( process.stdout, process.stderr ):
+                for iline in file:
+
+                    line = iline.decode()
+
+                    if   gcc_re.search(   line ) != None: return fortran_libs['gfortran']
+                    elif ifort_re.search( line ) != None: return fortran_libs['ifort']
+                
+        except Exception as e :
+            print( str(e) )
+            pass
+
+    return ''
+
+#
+# use pkg-config to retrieve package information
+#
+
+class PkgConfigError ( Exception ):
+    pass
+
+def pkgconfig ( prog, args ):
+    prog    = prog + ' ' + args
+    process = subprocess.Popen( shlex.split( prog ), stdout=subprocess.PIPE, stderr=subprocess.PIPE )
+    retval  = process.wait()
+
+    if retval == 0:
+        return re.sub( '\n', '', process.stdout.readline().decode() ) # Python3 : .readline().decode()
+    else:
+        if verbose > 3:
+            for file in ( process.stdout, process.stderr ):
+                for line in file:
+                    sys.stdout.write( line )
+        raise PkgConfigError
+    
+###############################################################
+###############################################################
+##
+## test functions
+##
+###############################################################
+###############################################################
+
+#
+# return string containing source for individual test
+#
+def testsrc ( name ):
+    sources = {
+
+        ########################################################################
+
+        'CC' :
+
+        """
+          int main () { 
+            return 0; }
+        """,
+
+        ########################################################################
+
+        'C++11' :
+
+        """
+          #include <vector>
+          int main () { 
+            std::vector< double >  x( 10 );
+            auto  f = [&x] { for ( auto & v : x ) v++; };
+            return 0; 
+          }
+        """,
+
+        ########################################################################
+
+        'C++14' :
+
+        """
+          #include <type_traits>
+          #include <memory>
+          #include <vector>
+          int main () { 
+            using type_t = std::enable_if_t< true, void >;
+            auto  x = std::vector< double >( 10 );
+            auto  f = [&x] { for ( auto & v : x ) v++; };
+            auto  m = std::make_unique< double >();
+            return 0; 
+          }
+        """,
+
+        ########################################################################
+
+        'C++17' :
+
+        """
+          #include <type_traits>
+          #include <memory>
+          #include <vector>
+          #include <variant>
+          int main () { 
+            using type_t = std::enable_if_t< true, void >;
+            auto  x = std::vector< double >( 10 );
+            auto  f = [&x] { for ( auto & v : x ) v++; };
+            auto  m = std::make_unique< double >();
+            using  any_type_t = std::variant< int, double >;
+            any_type_t  a = int(42);
+            if constexpr ( 0 == 1 ) { return 1; }
+            return 0; 
+          }
+        """,
+
+        ########################################################################
+
+        'FC' :
+
+        """
+          program hello
+            print *, "Hello World!"
+          end program hello
+        """,
+
+        ########################################################################
+
+        'LAPACK' :
+
+        """extern \"C\" void dgesvd_ ( char * jobu, char * jobv, int * n, int * m, 
+                                       double * A, int * lda, double * S, double * U, 
+                                       int * ldu, double * V, int * ldv, double * work, 
+                                       int * lwork, int * info ); 
+         int main () { 
+           dgesvd_( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ); 
+           return 0; }
+        """,
+
+        ########################################################################
+
+        'MKL' :
+
+        """#include <mkl_lapack.h> 
+         int main () { 
+           dgesvd_( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ); 
+           return 0; }
+        """,
+
+        ########################################################################
+
+        'MKL sequential' :
+
+        """#include <mkl_service.h> 
+         int main () { 
+           if ( mkl_get_max_threads() <= 1 ) return 0;
+           else                              return 1; }
+        """,
+
+        ########################################################################
+
+        'gejsv' :
+
+        """extern \"C\" {
+             void dgejsv_(char *joba, char *jobu, char *jobv, char *jobr,
+                          char *jobt, char *jobp, int *m, int *n, double *a,
+                          int *lda, double *sva, double *u, int *ldu,
+                          double *v, int *ldv, double *work, int *lwork,
+                          int *iwork, int *info );
+             void sgejsv_(char *joba, char *jobu, char *jobv, char *jobr,
+                          char *jobt, char *jobp, int *m, int *n, float *a,
+                          int *lda, float *sva, float *u, int *ldu,
+                          float *v, int *ldv, float *work, int *lwork,
+                          int *iwork, int *info ); }
+         int main () { 
+           dgejsv_( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ); 
+           sgejsv_( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ); 
+           return 0; }
+        """,
+
+        ########################################################################
+
+        'CUDA' :
+
+        """#include <cuda_runtime.h>
+         #include <cublas_v2.h>
+         #include <cusolverDn.h>
+         int main () {
+           cudaStream_t        stream;
+           cublasHandle_t      blas;
+           cusolverDnHandle_t  solver;
+           cusolverDnParams_t  params;
+           cudaStreamCreateWithFlags( & stream, cudaStreamNonBlocking );
+           cublasCreate( & blas );
+           cusolverDnCreate( & solver );
+           cusolverDnXgesvd( solver, params, 'O', 'S', 1, 1, CUDA_R_32F, nullptr, 1, CUDA_R_32F, nullptr, CUDA_R_32F, nullptr, 1,
+                             CUDA_R_32F, nullptr, 1, CUDA_R_32F, nullptr, 1, nullptr, 1, nullptr );
+           return 0; }
+        """,
+
+        ########################################################################
+
+        'HIP' :
+
+        """#include <hipblas/hipblas.h>
+         #include <hipsolver/hipsolver.h>
+         int main () {
+           hipStream_t        stream;
+           hipsolverHandle_t  solver;
+           hipStreamCreate( & stream );
+           hipsolverCreate( & solver );
+           hipsolverSgesvd( solver, 'O', 'S', 1, 1, nullptr, 1, nullptr, nullptr, 1, nullptr, 1, nullptr, 1, nullptr, nullptr );
+           hipsolverDgesvd( solver, 'O', 'S', 1, 1, nullptr, 1, nullptr, nullptr, 1, nullptr, 1, nullptr, 1, nullptr, nullptr );
+           return 0; }
+        """,
+
+        ########################################################################
+
+        'gesvj' :
+
+        """extern \"C\" { 
+             void dgesvj_ ( char * joba, char * jobu, char * jobv, int * m, int * n, double * a,
+                            int * lda, double * sva, int * mv, double * v, int * ldv, double * work,
+                            int * lwork, int * info );             
+             void zgesvj_ ( char * joba, char * jobu, char * jobv, int * n, int * m, double * A,
+                            int * lda, double * S, int * mv, double * V, int * ldv, double * cwork,
+                            int * lwork, double * rwork, int * lrwork, int * info ); }
+         int main () { 
+           dgesvj_( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ); 
+           zgesvj_( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ); 
+           return 0; }
+        """,
+
+        ########################################################################
+
+        'MPI' :
+
+        """#define MPICH_SKIP_MPICXX
+         #define OMPI_SKIP_MPICXX
+         #include <mpi.h>
+         int main () { 
+           MPI_Init( 0, 0 );
+           MPI_Send( 0, 0, MPI_BYTE, 0, 0, MPI_COMM_WORLD );
+           MPI_Recv( 0, 0, MPI_BYTE, 0, 0, MPI_COMM_WORLD, 0 );
+           return 0; }
+        """,
+
+        ########################################################################
+
+        'OpenMP' :   
+
+        """
+         #include <omp.h> 
+         int main () { 
+           #pragma omp parallel num_threads( 2 )
+           {
+           #pragma omp single
+           {}
+           }
+           return 0; }
+        """,
+
+        ########################################################################
+
+        'OpenMP_SIMD' :
+
+        """
+          int main () {
+            auto  x = new double[16];
+            #pragma omp simd
+            for ( int  i = 0; i < 16; ++i )
+              x[i] = x[i] * x[i];
+            return 0; 
+          }
+        """,
+
+        ########################################################################
+
+        'PTHREADS' :   
+
+        """
+         #include <pthread.h> 
+         extern \"C\" void * __run ( void * arg ) { return NULL; } 
+         int main () { 
+           pthread_t t; 
+           pthread_create( & t, 0, __run, 0 ); 
+           return 0; }
+        """,
+
+        ########################################################################
+
+        'WINTHREADS' :
+
+        """
+         #include <Windows.h> 
+         #include <process.h> 
+         int main () { 
+           _beginthreadex( 0, 0, 0, 0, 0, 0 ); 
+           _endthreadex( 0 );
+           return 0; }
+        """,
+
+        ########################################################################
+
+        'X11' :
+
+        """
+         #include <X11/X.h> 
+         #include <X11/Xlib.h> 
+         #include <X11/Xutil.h> 
+         int main () { 
+             Display * display = XOpenDisplay( 0 ); 
+             XCloseDisplay( display ); 
+             return 0; }
+        """,
+        
+        ########################################################################
+       
+        'Boost' :
+
+        """
+         #include <string>
+         #include <vector>
+         #include <iostream>
+         #include <boost/random/mersenne_twister.hpp>
+         #include <boost/random/uniform_real.hpp>
+         #include <boost/random/variate_generator.hpp>
+         #include <boost/format.hpp>
+         #include <boost/tuple/tuple.hpp>
+         #include <boost/algorithm/string.hpp>
+         int main () { 
+           std::string                          str, delim;
+           std::vector< std::string >           parts;
+           boost::split( parts, str, boost::is_any_of( delim ) );
+           std::cout << boost::format( "%d" ) % 1 << std::endl;
+           return 0; }
+        """,
+         
+        ########################################################################
+       
+        'Boost_iostreams' :
+
+        """
+         #include <sstream>
+         #include <boost/iostreams/filtering_stream.hpp>
+         #include <boost/iostreams/device/file_descriptor.hpp>
+         #include <boost/iostreams/filtering_stream.hpp>
+         #include <boost/iostreams/filter/gzip.hpp>
+         #include <boost/iostreams/filter/bzip2.hpp>
+         #include <boost/iostreams/filter/zlib.hpp>
+         int main () { 
+           boost::iostreams::filtering_istream  zin;
+           std::istringstream                   strin( "" );
+           zin.push( boost::iostreams::zlib_decompressor()  );
+           zin.push( boost::iostreams::gzip_decompressor()  );
+           zin.push( boost::iostreams::bzip2_decompressor() );
+           zin.push( strin );
+           return 0; }
+        """,
+         
+        ########################################################################
+       
+        'TBB' :
+
+        """
+         #include <tbb/parallel_for.h>
+         #include <tbb/task_group.h>
+         int main () { 
+           tbb::task_group  tg;
+           tg.run( [] {} );
+           tbb::parallel_for< int >( 0, 10, [] ( int ) {} );
+           return 0; }
+        """,
+
+        ########################################################################
+       
+        'zlib' :
+
+        """
+         #include <zlib.h> 
+         int main () { 
+           char * buf = 0; 
+           gzFile file = gzopen( buf, \"r\" ); 
+           gzclose( file ); 
+           return 0; }
+        """,
+         
+        ########################################################################
+      
+        'METIS' :
+
+        """
+         extern \"C\" {
+         #include <metis.h>
+         }
+         int main () { 
+           #if defined(METIS_VER_MAJOR) && METIS_VER_MAJOR >= 5
+           METIS_PartGraphRecursive( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ); 
+           #else
+           METIS_PartGraphRecursive( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ); 
+           #endif
+           return 0; }
+        """,
+         
+        ########################################################################
+      
+        'Scotch' :
+
+        """
+         #include <stdio.h> 
+         #include <stdint.h> 
+         extern \"C\" { 
+         #include <scotch/scotch.h> 
+         } 
+         int main () { 
+           SCOTCH_graphInit( 0 ); 
+           return 0; }
+        """,
+               
+        ########################################################################
+
+        'Chaco' :
+
+        """
+         extern \"C\" { 
+         int interface ( int, int *, int *, int *, float *, float *, 
+                         char *, char *, short *, int, int, int, double *, 
+                         int, int, int, int, int, double, long ); } 
+         int main () { 
+           interface( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ); 
+           return 0; }
+        """,
+         
+        ########################################################################
+      
+        'MONGOOSE' :
+
+        """
+         #include <Mongoose.hpp>
+         int main () { 
+           auto  options = Mongoose::EdgeCut_Options::create();
+           auto  graph   = Mongoose::Graph::create( 10, 20 );
+           auto  edgecut = Mongoose::edge_cut( graph, options );
+           return 0; }
+        """,
+         
+        ########################################################################
+
+        'FFTW' :
+
+        """
+         #include <fftw3.h>
+         int main () { 
+           fftw_plan  p = fftw_plan_dft_1d( 0, 0, 0, FFTW_FORWARD, FFTW_ESTIMATE );
+           fftw_execute( p );
+           fftw_destroy_plan( p );
+           return 0; }
+        """,
+         
+        ########################################################################
+
+        'GSL' :
+
+        """
+         #include <gsl/gsl_sf_bessel.h>
+         #include <gsl/gsl_sf_gamma.h>
+         int main () { 
+           double x = gsl_sf_bessel_Knu( 0.0, 0.0 );
+           double y = gsl_sf_gamma( 0.0 );
+           return 0; }
+        """,
+         
+        ########################################################################
+
+        'Cairo' :
+
+        """
+         #include <cairo/cairo.h>
+         #include <cairo/cairo-pdf.h>
+         int main () { 
+           cairo_surface_t *  s = cairo_pdf_surface_create_for_stream( 0, 0, 0, 0 );
+           cairo_t *          c = cairo_create( s );
+           cairo_destroy( c );
+           cairo_surface_destroy( s );
+           return 0; }
+        """,
+         
+        ########################################################################
+
+        'HDF5' :
+
+        """
+         #include <H5Cpp.h>
+         int main () { 
+           H5::H5File     file( \"test.h5\", H5F_ACC_TRUNC );
+           H5::Group      group( file.createGroup( \"/group\" ) );
+           hsize_t        dims[2] = { 10, 10 };              
+           H5::DataSpace  dataspace( 2, dims );
+           return 0; }
+        """,
+         
+        ########################################################################
+
+        'NetCDF' :
+
+        """
+         #include <netcdf.h>
+         int main () {
+           const char *  filename = "";
+           int           nc_file, nc_dims, nc_var, val;
+           size_t        dims, start, count;
+           ptrdiff_t     stride;
+           nc_create( filename, NC_64BIT_OFFSET, &nc_file );
+           nc_def_dim( nc_file, "dim", dims, &nc_dims );
+           nc_def_var( nc_file, "var", NC_INT, 1, &nc_dims, &nc_var);
+           nc_put_vars( nc_file, nc_var, &start, &count, &stride, &val );
+           return 0; }
+        """,
+         
+        ########################################################################
+
+        'CGAL' :
+
+        """
+         #include <vector>
+         #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
+         #include <CGAL/hilbert_sort.h>
+         int main () {
+           typedef CGAL::Exact_predicates_inexact_constructions_kernel K;
+           typedef K::Point_2                                          Point;
+           std::vector<Point> v;
+           CGAL::hilbert_sort( v.begin(), v.end() );
+           return 0; }
+        """,
+         
+        ########################################################################
+
+        'AMD libm' :
+
+        """
+         #include <emmintrin.h>
+         extern \"C\" { 
+         double amd_exp    (double x);
+         double amd_log    (double x);
+         void   amd_sincos (double x, double *s, double *c);
+         __m128d amd_vrd2_exp    (__m128d x);
+         void    amd_vrd2_sincos (__m128d x, __m128d *ys, __m128d *yc); }
+         int main () { 
+           __m128d  f = { 0.1, 0.2 }, c, s;
+           amd_exp( 0.0 );
+           amd_log( 0.0 );
+           amd_sincos( 0.0, 0, 0 );
+           amd_vrd2_exp( f );
+           amd_vrd2_sincos( f, & s, & c );
+           return 0; }
+        """,
+         
+        ########################################################################
+
+        'ACML' :
+
+        """
+         extern \"C\" { 
+           double fastexp    ( double );
+           double fastlog    ( double );
+           void   fastsincos ( double, double *, double * ); }
+         int main () { 
+           fastexp( 0.0 );
+           fastlog( 0.0 );
+           fastsincos( 0.0, 0, 0 );
+           return 0; }
+        """,
+         
+        ########################################################################
+
+        'SVML' :
+
+        """
+         #include <math.h>
+         #include <emmintrin.h>
+         extern \"C\" { 
+           __m128d _mm_sincos_pd (__m128d * r1, __m128d v1);
+           __m128d _mm_exp_pd    (__m128d); }
+         int main () { 
+           {
+             __m128d  f = { 0.1, 0.2 }, c, s;
+             s = _mm_sincos_pd( & c, f );
+             s = _mm_exp_pd( f );
+             f = _mm_add_pd( s, c );
+           }
+           {
+             float f = 1.f, s, c;
+             sincosf( f, & s, & c );
+           }
+           return 0; }
+        """,
+         
+        ########################################################################
+
+        'libmvec' :
+
+        """
+         #include <immintrin.h>
+         extern \"C\" { 
+           __m128d _ZGVbN2v_exp ( __m128d  x ); __m128d _ZGVbN2v_sin ( __m128d  x );
+           __m256d _ZGVcN4v_exp ( __m256d  x ); __m256d _ZGVcN4v_sin ( __m256d  x );
+           __m256d _ZGVdN4v_exp ( __m256d  x ); __m256d _ZGVdN4v_sin ( __m256d  x );
+           __m512d _ZGVeN8v_exp ( __m512d  x ); __m512d _ZGVeN8v_sin ( __m512d  x );
+         }
+         int main () { 
+           {
+             __m128d  f = { 0.1, 0.2 }, e, s;
+             e = _ZGVbN2v_exp( f ); s = _ZGVbN2v_sin( f );
+           }
+           {
+             __m256d  f = { 0.1, 0.2, 0.3, 0.4 }, e, s;
+             e = _ZGVcN4v_exp( f ); s = _ZGVcN4v_sin( f );
+           }
+           {
+             __m256d  f = { 0.1, 0.2, 0.3, 0.4 }, e, s;
+             e = _ZGVdN4v_exp( f ); s = _ZGVdN4v_sin( f );
+           }
+           {
+             __m512d  f = { 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8 }, e, s;
+             e = _ZGVeN8v_exp( f ); s = _ZGVeN8v_sin( f );
+           }
+           return 0; }
+        """,
+         
+        ########################################################################
+
+        'jemalloc' :
+
+        """
+         int main () { 
+           double * p = new double[8];
+           return 0; }
+        """,
+         
+        ########################################################################
+      
+        'mmap'   :
+
+        """
+         #include <sys/types.h> 
+         #include <sys/mman.h> 
+         int main () { 
+          mmap( 0, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE, 0, 0 ); 
+          return 0; }
+        """,
+
+        ########################################################################
+
+        'gettimeofday' : 
+
+        """
+         #include <sys/time.h> 
+         #include <time.h> 
+         int main () { 
+           struct timeval tv; 
+           gettimeofday( & tv, 0 ); 
+           return 0; }
+        """,
+
+        ########################################################################
+
+        'getrusage' :
+
+        """
+         #include <sys/time.h>
+         #include <sys/resource.h>
+         int main () { 
+           getrusage( RUSAGE_SELF, 0 ); 
+           return 0; }
+        """,
+        
+        ########################################################################
+                       
+        'getpagesize' : 
+
+        """
+         #include <unistd.h>
+         int main () { 
+           int ps = getpagesize(); 
+           return ps; }
+        """,
+        
+        ########################################################################
+                       
+        'GetTickCount' : 
+
+        """
+         #include <Windows.h>
+         int main () { 
+           unsigned long ticks = GetTickCount(); 
+           return 0; }
+        """,
+
+        ########################################################################
+        
+        'GetProcessTimes' : 
+
+        """
+         #include <Windows.h>
+         int main () { 
+           GetProcessTimes( 1, 0, 0, 0, 0 ); 
+           return 0; }
+        """,
+        
+        ########################################################################
+                       
+        'CRITICAL_SECTION' : 
+
+        """
+         #include <Windows.h>
+         int main () { 
+           CRITICAL_SECTION  cs; 
+           InitializeCriticalSection( & cs ); 
+           EnterCriticalSection( & cs ); 
+           LeaveCriticalSection( & cs ); 
+           TryEnterCriticalSection( & cs ); 
+           DeleteCriticalSection( & cs ); 
+           return 0; }
+        """,
+                               
+        ########################################################################
+
+        'CONDITION_VARIABLE' : 
+
+        """
+         #include <Windows.h>
+         int main () { 
+           CONDITION_VARIABLE  cond; 
+           CRITICAL_SECTION    cs; 
+           InitializeConditionVariable( & cond ); 
+           SleepConditionVariableCS( & cond, & cs, INFINITE ); 
+           WakeConditionVariable( & cond ); 
+           WakeAllConditionVariable( & cond ); 
+           return 0; }
+        """,
+                               
+        ########################################################################
+
+        'clock_gettime' : 
+
+        """
+         #include <time.h>
+         int main () { 
+           struct timespec ts;
+           clock_gettime( CLOCK_REALTIME, & ts );
+           clock_gettime( CLOCK_PROCESS_CPUTIME_ID, & ts );
+           return 0; }
+        """,
+                               
+        ########################################################################
+
+        'lwp_info' :     
+
+        """
+         #include <sys/lwp.h>
+         int main () { 
+           _lwp_info( 0 ); 
+           return 0; }
+        """,
+
+        ########################################################################
+
+        'strerror_r' :     
+
+        """
+         #include <string.h> 
+         int main () { 
+           char * buf = 0; 
+           strerror_r( 0, buf, 0 ); 
+           return 0; }
+        """,
+
+        ########################################################################
+
+        'localtime_r' :     
+
+        """
+         #include <time.h> 
+         int main () { 
+           localtime_r( 0, 0 ); 
+           return 0; }
+        """,
+
+        ########################################################################
+
+        'unordered_map' :     
+
+        """
+         #include <unordered_map> 
+         typedef std::unordered_map< void *, int >   test_map_t;
+         int main () { 
+           test_map_t  map;
+           return 0; }
+        """,
+
+        ########################################################################
+
+        'boost_unordered_map' :     
+
+        """
+         #include <boost/unordered_map.hpp> 
+         typedef boost::unordered_map< void *, int >   test_map_t;
+         int main () { 
+           test_map_t  map;
+           return 0; }
+        """,
+
+        ########################################################################
+
+        'backtrace' :     
+
+        """
+         #include <execinfo.h> 
+         int main () {
+           void *   addr_buf[1]; 
+           backtrace( addr_buf, 1 );
+           return 0; }
+        """,
+
+        ########################################################################
+
+        'cxx_demangle' :     
+
+        """
+         #include <cxxabi.h> 
+         int main () { 
+           abi::__cxa_demangle( 0, 0, 0, 0 );
+           return 0; }
+        """,
+
+        ########################################################################
+
+        'sincos' : 
+        
+        """
+         #include <cmath>
+         int main () { 
+           sincos( 0.0, 0, 0 );
+           return 0; }
+        """,
+        
+        ########################################################################
+
+        'SSE' : 
+        
+        """
+         #include <xmmintrin.h>
+         int main () { 
+           __m128 f = _mm_set_ps( 1.f, 2.f, 3.f, 4.f ); 
+           f = _mm_mul_ps( f, f ); 
+           return 0; }
+        """,
+        
+        ########################################################################
+
+        'SSE2' : 
+
+        """
+         #include <emmintrin.h>
+         int main () { 
+           __m128d f = _mm_set_pd( 1.0, 2.0 ); 
+           f = _mm_mul_pd( f, f ); 
+           return 0; }
+        """,
+
+        ########################################################################
+        
+        'SSE3' :
+
+        """
+         #include <pmmintrin.h>
+         int main () { 
+           __m128d f = _mm_set_pd( 1.0, 2.0 ); 
+           f = _mm_addsub_pd( f, f ); 
+           f = _mm_hadd_pd( f, f ); 
+           return 0; }
+        """,
+
+        ########################################################################
+
+        'AVX' : 
+        
+        """
+         #include <immintrin.h>
+         int main () { 
+           __m256d f = _mm256_set_pd( 1.0, 2.0, 3.0, 4.0 ); 
+           f = _mm256_mul_pd( f, f ); 
+           return 0; }
+        """,
+        
+        ########################################################################
+
+        'AVX2' : 
+        
+        """
+         #include <immintrin.h>
+         int main () { 
+           __m256d f = _mm256_set_pd( 1.0, 2.0, 3.0, 4.0 ); 
+           f = _mm256_fmadd_pd( f, f, f ); 
+           return 0; }
+        """,
+        
+        ########################################################################
+
+        'MIC' : 
+        
+        """
+         #include <immintrin.h>
+         int main () { 
+           __m512d f = _mm512_set_pd( 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0 ); 
+           f = _mm512_mul_pd( f, f ); 
+           return 0; }
+        """,
+        
+        ########################################################################
+
+        'AVX512F' : 
+        
+        """
+         #include <immintrin.h>
+         int main () { 
+           __m512d f = _mm512_set_pd( 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0 ); 
+           f = _mm512_mul_pd( f, f ); 
+           f = _mm512_add_pd( f, f ); 
+           return 0; }
+        """,
+        
+        ########################################################################
+
+        'VSX' : 
+        
+        """
+         #include <altivec.h>
+         int main () { 
+           vector double f{ 1.0, 2.0 }; 
+           f = vec_mul( f, f ); 
+           f = vec_div( f, f ); 
+           return 0; }
+        """,
+        
+        ########################################################################
+
+        'NEON' : 
+        
+        """
+         #include <arm_neon.h>
+         int main () { 
+           float32x4_t  fx = vmovq_n_f32( 1.f );
+           float32x4_t  fy = vmovq_n_f32( 2.f );
+           float32x4_t  fz = vmulq_f32( fx, fy );
+           float64x2_t  dx = vmovq_n_f64( 1.0 );
+           float64x2_t  dy = vmovq_n_f64( 2.0 );
+           float64x2_t  dz = vmulq_f64( dx, dy );
+           return 0; }
+        """,
+        
+        ########################################################################
+
+        'C99 complex' : 
+        
+        """
+         #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
+         #include <complex.h>
+         #endif
+         int main () { 
+           double complex f = 2.0 * 3.0;
+           return 0; }
+        """,
+        
+        ########################################################################
+
+        'cpuid' : 
+        
+        """
+         int main () { 
+           asm volatile ( "cpuid" : : : "%eax" );
+           return 0; }
+        """,
+        
+        ########################################################################
+
+        'LIC_OBJ' : 
+        
+        """
+         extern "C" {
+           int checkout_license ( const char *, const char *, const int );
+           int checkin_license  (); 
+         }
+         int main () { 
+           checkout_license( 0, 0, 0 );
+           checkin_license(); 
+           return 0; }
+        """,
+        
+        }
+
+    return sources[name] + '\n' # eol mollifies GCC
+
+#
+# print test name 
+#
+def print_test ( groupname, name ) :
+    print( bold( ' %s ' % ( name ) ) + tmsg['hell'] * ( 18 - len(name) ) + ' ', end = '' )
+    # print( ( '%-8s  ' % groupname ) + bold( '%s ' % ( name ) ) + tmsg['hell'] * ( 18 - len(name) ) + ' ', end = '' )
+
+#
+# check if library is available
+#
+def check_prog ( name, prog, find = '', prn = True ):
+
+    if prn :
+        print_test( 'Program', name )
+
+    try :
+        poutput = tempfile.TemporaryFile()
+        process = subprocess.Popen( shlex.split( prog ), stdout = poutput, stderr = poutput )
+        process.wait()
+
+        if verbose > 4 :
+            poutput.seek( 0 )
+            for line in poutput: 
+                line = re.sub( '\n', '', line.decode( 'utf-8' ) )
+                print( line )
+        else :
+            log = open_log()
+            log.write( '\n' + name + '\n' )
+            log.write( '\n' + prog + '\n\n' )
+            poutput.seek( 0 )
+            for line in poutput: 
+                log.write( line.decode( 'utf-8' ) )
+            log.close()
+            
+
+        # look for given string in output of program
+        if find != '':
+            poutput.seek( 0 )
+            for line in poutput: 
+                if re.search( find, line.decode( 'utf-8' ) ):
+                    if prn : print( tmsg['success'] )
+                    return True
+
+        if process.returncode != 0:
+            if prn : print( tmsg['failure'] )
+            return False
+        else:
+            if prn : print( tmsg['success'] )
+            return True
+    except :
+        if prn : print( tmsg['failure'] )
+        return False
+
+    if prn : print( tmsg['failure'] )
+    return False
+
+def check_cc ( name, cc, flags, conf = cxxconf, test = 'CC', prn = True ):
+    if prn :
+        print_test( 'Compiler', name )
+
+    try :
+        f = open( conf['source'], 'w' )
+        f.write( testsrc( test ) )
+        f.close()
+    except :
+        return True
+
+    if get_system() == 'Windows':
+        return call_prog( cc + ' ' + conf['source'] + ' /Fo' + conf['prog'] + ' ' + flags, conf, prn = prn );
+    else:
+        return call_prog( cc + ' ' + conf['source'] + ' -o ' + conf['prog'] + ' ' + flags, conf, prn = prn );
+
+def check_fc ( name, fc, flags, conf = fconf, prn = True ):
+    if prn :
+        print_test( 'Compiler', name )
+
+    try :
+        f = open( conf['source'], 'w' )
+        f.write( testsrc( 'FC' ) )
+        f.close()
+    except :
+        return True
+
+    if get_system() == 'Windows':
+        return call_prog( fc + ' ' + conf['source'] + ' /Fo' + conf['prog'] + ' ' + flags, conf, prn = prn );
+    else:
+        return call_prog( fc + ' ' + conf['source'] + ' -o ' + conf['prog'] + ' ' + flags, conf, prn = prn );
+
+#
+# common check for functions
+#
+def check_core ( name, cc, flags, conf = cxxconf, exe = False, groupname = 'Function', prn = True ):
+
+    log = open_log()
+    log.write( '\n' + name + '\n' )
+    
+    if prn :
+        print_test( groupname, name )
+
+    source = testsrc( name )
+
+    log.write( source )
+    log.close()
+    
+    if source == '':
+        if prn :
+            print( bold( 'NO TEST!!!' ) )
+        return False
+
+    try :
+        f = open( conf['source'], 'w' )
+        f.write( source )
+        f.close()
+
+        if exe : subprog = os.path.abspath( conf['prog'] )
+        else   : subprog = ''
+
+        if get_system() == 'Windows':
+            return call_prog( cc + ' ' + conf['source'] + ' /Fo' + conf['prog'] + ' ' + flags, conf, subprog, prn );
+        else:
+            return call_prog( cc + ' ' + conf['source'] + ' -o ' + conf['prog'] + ' ' + flags, conf, subprog, prn );
+
+    except :
+        return True
+        
+#
+# special checks (just names)
+#
+def check_lib ( name, cc, flags, conf = cxxconf ):
+    return check_core( name, cc, flags, conf, False, 'Library' )
+
+def check_func ( name, cc, flags, conf = cxxconf, exe = False ):
+    return check_core( name, cc, flags, conf, exe, 'Function' )
+
+def check_feat ( name, cc, flags, conf = cxxconf, exe = False ):
+    return check_core( name, cc, flags, conf, exe, 'Feature' )
+
+
+#
+# misc.
+#
+def call_prog ( prog, conf, subprog = '', prn = True ):
+
+    #####################
+    # helper function
+    def exe_prog ( prog ):
+        poutput = tempfile.TemporaryFile()
+        process = subprocess.Popen( shlex.split( prog ), stdout = poutput, stderr = poutput )
+        process.wait()
+
+        if verbose > 4:
+            poutput.seek( 0 )
+            for line in poutput: 
+                line = re.sub( '\n', '', line.decode( 'utf-8' ) )
+                print( line )
+        else :
+            log = open_log()
+            log.write( '\n' + prog + '\n\n' )
+            poutput.seek( 0 )
+            for line in poutput: 
+                log.write( line.decode( 'utf-8' ) )
+            log.close()
+
+        if process.returncode != 0 : return False
+        else :                       return True
+
+    #####################
+
+    if verbose > 3:
+        print( prog )
+
+    ret = True
+
+    try :
+        ret = exe_prog( prog )
+
+        if ret and subprog != '' :
+            ret = exe_prog( subprog )
+
+        if ret == 0:
+            if prn : print( tmsg['failure'] )
+        else:
+            if prn : print( tmsg['success'] )
+
+    except Exception as e:
+        print( str( e ) )
+        ret = False
+
+    try :
+        os.remove( conf['source'] )
+    except :
+        pass
+
+    try :
+        os.remove( conf['obj'] )
+    except :
+        pass
+
+    try :
+        os.remove( conf['prog'] )
+    except :
+        pass
+
+    return ret
+
+#
+# test system and compiler environment
+#
+def test_environment ( env ):
+    """Test complete environment, e.g. compilers, libraries, functions"""
+
+    compenv = env.copy()
+
+    # first test pkg-config for "expand" to work
+    if compenv['HAS_PKGCONFIG'] in [ 'yes', 'check' ] :
+        if check_prog( 'pkg-config', compenv['PKGCONFIG'] + ' --help', prn = False ) :
+            env['HAS_PKGCONFIG'] = compenv['HAS_PKGCONFIG'] = 'yes'
+        else :
+            env['HAS_PKGCONFIG'] = compenv['HAS_PKGCONFIG'] = 'check'
+            
+    expand_env( compenv )
+
+    if not check_cc( 'C', compenv['CC'], '', cconf ):
+        print( 'No working C compiler available !!!' )
+        sys.exit( 1 )
+    
+    if not check_cc( 'C++17', compenv['CXX'], '', test = 'C++17' ):
+        compenv['CXX'] = compenv['CXX'] + ' ' + '-std=c++17'
+        if not check_cc( 'C++ -std=c++17', compenv['CXX'], '', test = 'C++17' ):
+            print( 'C++ compiler does not support C++17!!!' )
+            sys.exit( 1 )
+        else :
+            env['CXX'] = env['CXX'] + ' ' + '-std=c++17'
+            
+    if not check_fc( 'Fortran', compenv['FC'], '' ):
+        print( 'No working Fortran compiler available !!!' )
+        sys.exit( 1 )
+
+    if check_cc( 'OpenMP SIMD', compenv['CXX'], '-fopenmp-simd', test = 'OpenMP_SIMD' ):
+        env['CXX'] = compenv['CXX'] + ' ' + '-fopenmp-simd'
+            
+    # if compenv['USE_CPUFLAGS'] == 'yes' or compenv['USE_CPUFLAGS'] == 'check':
+    #     print_test( 'Program', 'cpuflags' )
+    #     success = check_prog( 'cpuflags', compenv['CPUFLAGS'] + ' --comp="' + compenv['CXX'] + '"', prn = False )
+        
+    #     if not success :
+    #         print( tmsg['failed'] )
+    #         env['USE_CPUFLAGS'] = 'check'
+    #     else :
+    #         # add default compiler flags if cpuflags is present
+    #         flags = readln( compenv['CPUFLAGS'] + ' --warn=C++ --comp="' + compenv['CXX'] + '"' )
+    #         flags = re.sub( '\n', '', flags )
+    #         compenv['CXXFLAGS'] = compenv['CXXFLAGS'] + ' ' + flags
+    #         flags = readln( compenv['CPUFLAGS'] + ' --warn=C --comp="' + compenv['CC'] + '"' )
+    #         flags = re.sub( '\n', '', flags )
+    #         compenv['CFLAGS'] = compenv['CFLAGS'] + ' ' + flags
+            
+    #         # and recheck, whether the flags really work
+    #         success = check_cc( 'C (cpuflags)', compenv['CC'], compenv['CFLAGS'], cconf, prn = False )
+            
+    #         if not success :
+    #             print( tmsg['failure'] )
+    #             print( 'C compiler not compatible with cpuflags !!!' )
+    #             print( '(Used ' + bold( compenv['CC'] + ' ' + compenv['CFLAGS'] ) + ')' )
+    #             sys.exit( 1 )
+
+    #         success = check_cc( 'C++ + cpuflags', compenv['CXX'], compenv['CXXFLAGS'], prn = False )
+            
+    #         if not success :
+    #             print( tmsg['failure'] )
+    #             print( 'C++ compiler not compatible with cpuflags !!!' )
+    #             print( '(Used ' + bold( compenv['CXX'] + ' ' + compenv['CXXFLAGS'] ) + ')' )
+    #             sys.exit( 1 )
+
+    #         success = check_fc( 'Fortran (cpuflags)', compenv['FC'], compenv['FCFLAGS'], prn = False )
+    #         if not success :
+    #             print( tmsg['failure'] )
+    #             print( 'FORTRAN compiler not compatible with cpuflags !!!' )
+    #             print( '(Used ' + bold( compenv['FC'] + ' ' + compenv['FCFLAGS'] ) + ')' )
+    #             sys.exit( 1 )
+
+    #         env['USE_CPUFLAGS'] = 'yes'
+    #         print( tmsg['success'] )
+
+    if compenv['MKL'] == 'yes' or compenv['MKL'] == 'check' :
+        if check_lib( 'MKL', compenv['CXX'],
+                      compenv['CXXFLAGS'] + ' ' + compenv['MKLCFLAGS'] + ' ' +
+                      compenv['LFLAGS']   + ' ' + compenv['MKLLFLAGS'] ):
+            env['MKL']        = 'yes'
+            env['LAPACK_SRC'] = compenv['LAPACK_SRC'] = 'MKL'
+            env['LAPACK_LIB'] = compenv['MKLLFLAGS']
+
+    if compenv['MKL'] == 'yes' or env['MKL'] == 'yes' :
+        if check_feat( 'MKL sequential', compenv['CXX'],
+                       compenv['CXXFLAGS'] + ' ' + compenv['MKLCFLAGS'] + ' ' +
+                       compenv['LFLAGS']   + ' ' + compenv['MKLLFLAGS'],
+                       exe = True ) :
+            env['MKL_SEQ'] = 'yes'
+        else :
+            env['MKL_SEQ'] = 'no'
+
+    if compenv['LAPACK_SRC'] == 'LOCAL':
+        if not check_lib( 'LAPACK', compenv['CXX'],
+                          compenv['CXXFLAGS'] + ' ' + compenv['LFLAGS'] + ' ' + compenv['LAPACK_LIB'] ):
+            print( 'No working LAPACK library found !!! Please define one with ' + bold( '--lapack' ) )
+            print( 'or use ' + bold( '--download-lapack' ) + ' to download LAPACK.' )
+            print( '(Used ' + bold( compenv['LFLAGS'] + ' ' + compenv['LAPACK_LIB'] ) + ')' )
+            sys.exit( 1 )
+
+    if compenv['CUDA'] == 'yes' or compenv['CUDA'] == 'check' :
+        if check_lib( 'CUDA', compenv['CXX'],
+                      compenv['CXXFLAGS'] + ' ' + compenv['CUDACFLAGS'] + ' ' +
+                      compenv['LFLAGS']   + ' ' + compenv['CUDALFLAGS'] ):
+            env['CUDA'] = 'yes'
+        else :
+            env['CUDA'] = 'check'
+
+    if compenv['HIP'] == 'yes' or compenv['HIP'] == 'check' :
+        if check_lib( 'HIP', compenv['CXX'],
+                      compenv['HIPDEFINES'] + ' ' +
+                      compenv['CXXFLAGS'] + ' ' + compenv['HIPCFLAGS'] + ' ' +
+                      compenv['LFLAGS']   + ' ' + compenv['HIPLFLAGS'] ):
+            env['HIP'] = 'yes'
+        else :
+            env['HIP'] = 'check'
+
+    if not check_lib( 'Boost', compenv['CXX'], compenv['CXXFLAGS'] + ' ' + 
+                      compenv['BOOSTCFLAGS'] + ' ' + compenv['BOOSTLFLAGS'] ):
+        print( 'No working Boost library found !!! Please check Boost directory.' )
+        print( '(Used ' + bold( compenv['BOOSTCFLAGS'] + ' ' + compenv['BOOSTLFLAGS'] ) + ')' )
+        sys.exit( 1 )
+
+    if compenv['HAS_BOOST_IOSTREAMS'] == 'yes' or compenv['HAS_BOOST_IOSTREAMS'] == 'check':
+        if not check_lib( 'Boost_iostreams', compenv['CXX'], compenv['CXXFLAGS'] + ' ' + 
+                          compenv['BOOSTCFLAGS'] + ' ' + compenv['BOOSTLFLAGS'] + ' -lboost_iostreams' ):
+            env['HAS_BOOST_IOSTREAMS'] = 'check'
+        else :
+            env['HAS_BOOST_IOSTREAMS'] = 'yes'
+
+
+    if compenv['ZLIB'] == 'yes' or compenv['ZLIB'] == 'check':
+        if not check_lib( 'zlib', compenv['CXX'], compenv['CXXFLAGS'] + ' ' + compenv['ZLIBCFLAGS'] + ' ' + compenv['ZLIBLFLAGS'] ):
+            env['ZLIB'] = 'check'
+        else:
+            env['ZLIB'] = 'yes'
+
+    if compenv['METIS'] == 'yes' or compenv['METIS'] == 'check':
+        if not check_lib( 'METIS', compenv['CXX'], compenv['CXXFLAGS'] + ' ' + compenv['METISCFLAGS'] + ' ' + compenv['METISLFLAGS'] ):
+            env['METIS'] = 'check'
+        else:
+            env['METIS'] = 'yes'
+
+    if compenv['SCOTCH'] == 'yes' or compenv['SCOTCH'] == 'check':
+        if not check_lib( 'Scotch', compenv['CXX'], compenv['CXXFLAGS'] + ' ' + compenv['SCOTCHCFLAGS'] + ' ' + compenv['SCOTCHLFLAGS'] ):
+            env['SCOTCH'] = 'check'
+        else:
+            env['SCOTCH'] = 'yes'
+
+    # if compenv['CHACO'] == 'yes' or compenv['CHACO'] == 'check':
+    #     if compenv['CHACODIR'] != '': lflags = '-L' + compenv['CHACODIR'] + ' ' + compenv['CHACOLFLAGS']
+    #     else :                        lflags = compenv['CHACOLFLAGS']
+
+    #     if not check_lib( 'Chaco', compenv['CXX'], compenv['CXXFLAGS'] + ' ' + lflags ):
+    #         env['CHACO'] = 'check'
+    #     else:
+    #         env['CHACO'] = 'yes'
+
+    if compenv['MONGOOSE'] == 'yes' or compenv['MONGOOSE'] == 'check':
+        if not check_lib( 'MONGOOSE', compenv['CXX'], compenv['CXXFLAGS'] + ' ' + compenv['MONGOOSECFLAGS'] + ' ' + compenv['MONGOOSELFLAGS'] ):
+            env['MONGOOSE'] = 'check'
+        else:
+            env['MONGOOSE'] = 'yes'
+
+    if compenv['GSL'] == 'yes' or compenv['GSL'] == 'check':
+        cflags = compenv['GSLCFLAGS']
+        lflags = compenv['GSLLFLAGS']
+
+        if not check_lib( 'GSL', compenv['CXX'], compenv['CXXFLAGS'] + ' ' + cflags + ' ' + lflags ):
+            env['GSL'] = 'check'
+        else:
+            env['GSL'] = 'yes'
+
+    if compenv['HDF5'] == 'yes' or compenv['HDF5'] == 'check':
+        cflags = compenv['HDF5CFLAGS']
+        lflags = compenv['HDF5LFLAGS']
+
+        if not check_lib( 'HDF5', compenv['CXX'], compenv['CXXFLAGS'] + ' ' + cflags + ' ' + lflags ):
+            env['HDF5'] = 'check'
+        else:
+            env['HDF5'] = 'yes'
+
+    if compenv['NETCDF'] == 'yes' or compenv['NETCDF'] == 'check':
+        cflags = compenv['NETCDFCFLAGS']
+        lflags = compenv['NETCDFLFLAGS']
+
+        if not check_lib( 'NetCDF', compenv['CXX'], compenv['CXXFLAGS'] + ' ' + cflags + ' ' + lflags ):
+            env['NETCDF'] = 'check'
+        else:
+            env['NETCDF'] = 'yes'
+
+    if compenv['CGAL'] == 'yes' or compenv['CGAL'] == 'check':
+        cflags = compenv['CGALCFLAGS']
+
+        if check_lib( 'CGAL', compenv['CXX'], compenv['CXXFLAGS'] + ' ' + cflags ):
+            env['CGAL'] = 'yes'
+        else:
+            env['CGAL'] = 'check'
+
+    if compenv['SVML'] == 'yes' or compenv['SVML'] == 'check':
+        lflags = compenv['SVMLLFLAGS']
+
+        if not check_lib( 'SVML', compenv['CXX'], compenv['CXXFLAGS'] + ' ' + lflags ):
+            env['SVML'] = 'check'
+        else:
+            env['SVML']    = 'yes'
+            env['AMDLIBM'] = 'check' # disable AMDLIBM when SVML is active
+            env['ACML']    = 'check' # disable ACML when SVML is active
+
+    if compenv['SVML'] != 'yes' and \
+       ( compenv['LIBMVEC'] == 'yes' or compenv['LIBMVEC'] == 'check' ):
+        lflags = "-lm"
+
+        if not check_lib( 'libmvec', compenv['CXX'], compenv['CXXFLAGS'] + ' ' + lflags ):
+            env['LIBMVEC'] = 'check'
+        else:
+            env['LIBMVEC'] = 'yes'
+            env['AMDLIBM'] = 'check' # disable AMDLIBM when libmvec is active
+            env['ACML']    = 'check' # disable ACML when libmvec is active
+
+    if env['SVML'] != 'yes' and env['LIBMVEC'] != 'yes' and \
+       ( compenv['AMDLIBM'] == 'yes' or compenv['AMDLIBM'] == 'check' ):
+        lflags = compenv['AMDLIBMLFLAGS']
+
+        if not check_lib( 'AMD libm', compenv['CXX'], compenv['CXXFLAGS'] + ' ' + lflags ):
+            env['AMDLIBM'] = 'check'
+        else:
+            env['AMDLIBM'] = 'yes'
+            env['ACML']    = 'check' # disable ACML when AMDLIBM is active
+
+    if env['SVML'] != 'yes' and env['LIBMVEC'] != 'yes' and env['AMDLIBM'] != 'yes' and \
+       ( compenv['ACML'] == 'yes' or compenv['ACML'] == 'check' ) :
+        lflags = compenv['ACMLLFLAGS']
+
+        if not check_lib( 'ACML', compenv['CXX'], compenv['CXXFLAGS'] + ' ' + lflags ):
+            env['ACML'] = 'check'
+        else:
+            env['ACML'] = 'yes'
+
+    #
+    # for SSE, AVX and MIC check first for compiler flags and then for
+    # builtin support
+    #
+
+    for ( func, name, compflag, execute ) in [ ( 'HAS_CPUID',   'cpuid',   '',                                           True  ),
+                                               ( 'HAS_SSE3',    'SSE3',    '-march=westmere -msse3',                     False ),
+                                               ( 'HAS_AVX',     'AVX',     '-march=sandybridge -mavx',                   False ),
+                                               ( 'HAS_AVX2',    'AVX2',    '-march=haswell -mavx2',                      False ),
+                                               ( 'HAS_MIC',     'MIC',     '-mmic',                                      False ),
+                                               ( 'HAS_AVX512F', 'AVX512F', '-march=skylake-avx512 -mavx512f -mavx512cd', False ),
+                                               ( 'HAS_VSX',     'VSX',     '-mvsx',                                      False ),
+                                               ( 'HAS_NEON',    'NEON',    '',                                           False )
+                                      ] :
+        if compenv[ func ] == 'yes' or compenv[ func ] == 'check':
+            flags = compenv['CXXFLAGS'] + ' ' + compenv['LFLAGS'] + ' ' + compflag
+            if not check_feat( name, compenv['CXX'], flags, cxxconf, execute ):
+                env[ func ] = 'check'
+            else:
+                env[ func ] = 'yes'
+
+    # for ( func, name ) in [ ( 'C99COMPLEX', 'C99 complex' ) ]:
+    #     if compenv['HAS_' + func ] == 'yes' or compenv['HAS_' + func ] == 'check':
+    #         if not check_func( name, compenv['CC'], compenv['CFLAGS'] + ' ' + compenv['LFLAGS'], cconf ):
+    #             env['HAS_' + func ] = 'check'
+    #         else:
+    #             env['HAS_' + func ] = 'yes'
+
+    for ( func, name, execute ) in [
+        ( 'HAS_CLOCKGETTIME',        'clock_gettime',       False ),
+        ( 'HAS_GETTIMEOFDAY',        'gettimeofday',        False ),
+        ( 'HAS_GETTICKCOUNT',        'GetTickCount',        False ),
+        ( 'HAS_GETPROCESSTIMES',     'GetProcessTimes',     False ),
+        ( 'HAS_LOCALTIME_R',         'localtime_r',         False ),
+        ( 'HAS_GETRUSAGE',           'getrusage',           False ),
+        ( 'HAS_LWPINFO',             'lwp_info',            False ),
+
+        # ( 'HAS_GETPAGESIZE',         'getpagesize',         False ),
+        # ( 'HAS_MMAP',                'mmap',                False ),
+
+        ( 'HAS_STRERROR_R',          'strerror_r',          False ),
+        ( 'HAS_BACKTRACE',           'backtrace',           False ),
+        ( 'HAS_CXXDEMANGLE',         'cxx_demangle',        False ),
+
+        # ( 'HAS_UNORDERED_MAP',       'unordered_map',       False ),
+        # ( 'HAS_BOOST_UNORDERED_MAP', 'boost_unordered_map', False ),
+        # ( 'HAS_BOOST_IOSTREAMS',     'boost_iostreams',     False ),
+
+        ( 'HAS_GEJSV',               'gejsv',               False ),
+        ( 'HAS_GESVJ',               'gesvj',               False ),
+        ( 'HAS_SINCOS',              'sincos',              False )
+
+        ]:
+        if compenv[ func ] == 'yes' or compenv[ func ] == 'check':
+            flags = compenv['CXXFLAGS'] + ' ' + compenv['LFLAGS'] + ' ' + compenv['LAPACK_LIB']
+            if not check_func( name, compenv['CXX'], flags, cxxconf, execute ):
+                env[ func ] = 'check'
+            else:
+                env[ func ] = 'yes'
+
+    if verbose > 0: print( '' ) 
+
+###############################################################
+###############################################################
+##
+## command line parser
+##
+###############################################################
+###############################################################
+
+#
+# getopt exception
+#
+class GetoptError(Exception):
+    def __init__ ( self, msg ):
+        self.msg = msg
+
+    def __str__ ( self ):
+        return 'GetoptError: ' + self.msg
+
+#
+# getopt parser
+# 
+def getopt ( args, options ):
+    """parse command line arguments like getopt.getopt but support
+       optional arguments"""
+
+    ret_args = []
+    optlist  = []
+    reeq     = re.compile( r'(.*?)=(.*)' )
+
+    while args != []:
+
+        arg = args.pop(0)
+
+        #
+        # if long option, look for '=' and extract argument
+        #
+        
+        arg_name = arg
+        arg_val  = ''
+
+        if len(arg) > 2 and arg[0:2] == '--':
+            m = reeq.search( arg )
+            if m != None:
+                arg_name = m.group(1)
+                arg_val  = m.group(2)
+
+        #
+        # compare with given options
+        #
+                
+        matched = False
+
+        for [ optname, opttype, optdef ] in options:
+            if optname == arg_name:
+                opt = optdef
+
+                if opttype == 'required':
+                    if arg_val != '': 
+                        opt = arg_val
+                    elif args != [] and args[0][0] != '-': 
+                        opt = args.pop(0)
+                    else :         
+                        raise GetoptError( 'option \'' + arg + '\' requires argument' )
+                elif opttype == 'optional':
+                    if arg_val != '': 
+                        opt = arg_val
+                    elif args != [] and args[0][0] != '-': 
+                        opt = args.pop(0)
+
+                optlist.append( [ arg_name, opt ] );
+
+                matched = True
+
+        if not matched:
+            ret_args.append( arg )
+
+    return [ optlist, ret_args ]
+
+###############################################################
+###############################################################
+##
+## main program
+##
+###############################################################
+###############################################################
+
+def main ( compenv ):
+    #
+    # determine operating system and setup default flags
+    #
+
+    compenv['TOPDIR'] = os.getcwd()
+
+    init_colours( compenv )
+
+    system = get_system()
+    chgenv = {}
+        
+    if   system == 'Linux' or system == 'CYGWIN': chgenv = linux_env
+    elif system == 'SunOS':                       chgenv = sunos_env
+    elif system == 'AIX':                         chgenv = aix_env
+    elif system == 'OSF1':                        chgenv = tru64_env
+    elif system == 'HP-UX':                       chgenv = hpux_env
+    elif system == 'Darwin':                      chgenv = darwin_env
+    elif system == 'Windows':                     chgenv = windows_env
+
+    for key, val in chgenv.items(): 
+        compenv[key] = val
+
+    origenv = compenv.copy()
+
+    #
+    # read old values from file, then from environment and
+    # finally from the command line
+    #
+    
+    # first read commandline in case a different config.cache
+    # file was chosen
+    cargs = sys.argv[1:]
+    try :
+        opts, cargs = getopt( cargs, [ [ '-f',       'required', '' ],
+                                       [ '--config', 'required', '' ] ] )
+
+        for opt, arg in opts:
+            if opt in ( '-f', '--config' ):
+                cache = arg
+    except :
+        pass
+
+    clear_log()
+    read_cache( compenv )
+
+    # evaluate environment
+    for key, val in os.environ.items():
+        if key in compenv :
+            compenv[key] = os.environ[key]
+
+    # now evaluate the rest of the commandline
+    parse_cmdline( cargs, compenv )
+
+    #
+    # test programs, libraries and functions
+    #
+
+    if check and not show:
+        test_environment( compenv )
+
+    #
+    # write current status to cache-file
+    #
+
+    if not show:
+        write_cache( compenv, origenv )
+
+    #
+    # merge variables and setup final flags
+    #
+
+    cwarn_flags   = ''
+    cxxwarn_flags = ''
+
+    # if compenv['USE_CPUFLAGS'] == 'yes' :
+    #     flags = readln( compenv['CPUFLAGS'] + ' --comp="' + compenv['CXX'] + '"' )
+    #     flags = re.sub( '\n', '', flags )
+    #     compenv['ARCHFLAGS'] = flags
+    #     flags = readln( compenv['CPUFLAGS'] + ' --comp="' + compenv['CXX'] + '" --opt --nocflags' )
+    #     flags = re.sub( '\n', '', flags )
+    #     compenv['OPTFLAGS'] = flags
+    #     flags = readln( compenv['CPUFLAGS'] + ' --comp="' + compenv['CC']  + '" --warn=C --nocflags' )
+    #     flags = re.sub( '\n', '', flags )
+    #     cwarn_flags = flags
+    #     flags = readln( compenv['CPUFLAGS'] + ' --comp="' + compenv['CXX'] + '" --warn=C++ --nocflags' )
+    #     flags = re.sub( '\n', '', flags )
+    #     cxxwarn_flags = flags
+
+    if compenv['CXXFLAGS'] == '' : compenv['CXXFLAGS'] = compenv['ARCHFLAGS'] + cxxwarn_flags
+    if compenv['CFLAGS']   == '' : compenv['CFLAGS']   = compenv['ARCHFLAGS'] + cwarn_flags
+    if compenv['FCFLAGS']  == '' : compenv['FCFLAGS']  = compenv['ARCHFLAGS']
+
+    if compenv['ZLIB'] == 'yes' :
+        if compenv['ZLIBDIR'] != '' :
+            compenv['ZLIBCFLAGS'] = ' -I' + compenv['ZLIBDIR'] + ' ' + compenv['ZLIBCFLAGS'] 
+            compenv['ZLIBLFLAGS'] = ' -L' + compenv['ZLIBDIR'] + ' ' + compenv['ZLIBLFLAGS']
+
+    if compenv['SCOTCH'] == 'yes' :
+        if compenv['SCOTCHDIR'] != '':
+            compenv['SCOTCHLFLAGS'] = ' -L' + compenv['SCOTCHDIR'] + ' ' + compenv['SCOTCHLFLAGS']
+
+    if compenv['SVML'] == 'yes' :
+        compenv['LFLAGS'] += ' ' + compenv['SVMLLFLAGS']
+
+    if compenv['SVML'] != 'yes' and compenv['LIBMVEC'] != 'yes' and compenv['AMDLIBM'] == 'yes' :
+        compenv['LFLAGS'] += ' ' + compenv['AMDLIBMLFLAGS']
+
+    if compenv['SVML'] != 'yes' and compenv['LIBMVEC'] != 'yes'and compenv['AMDLIBM'] != 'yes' and compenv['ACML'] == 'yes' :
+        compenv['LFLAGS'] += ' ' + compenv['ACMLLFLAGS']
+
+    if compenv['MKL'] == 'yes' :
+        compenv['CXXFLAGS'] += ' ' + compenv['MKLCFLAGS']
+
+    if compenv['CUDA'] == 'yes' :
+        compenv['CXXFLAGS'] += ' ' + compenv['CUDACFLAGS']
+        compenv['LFLAGS']   += ' ' + compenv['CUDALFLAGS']
+
+    if compenv['HIP'] == 'yes' :
+        compenv['DEFINES']  += ' ' + compenv['HIPDEFINES']
+        compenv['CXXFLAGS'] += ' ' + compenv['HIPCFLAGS']
+        compenv['LFLAGS']   += ' ' + compenv['HIPLFLAGS']
+
+    #
+    # replace all @variables
+    #
+
+
+    expand_env( compenv )
+
+    compenv = tidy_compenv( compenv )
+    
+    if verbose >= 1 or show:
+        print_env( compenv )
+
+    if show:
+        sys.exit( 0 )
+
+    #
+    # prepare for writing Makefiles and config.hh
+    #
+
+    # TBB not needed
+    compenv['USE_TBB' ] = '0'
+
+    for func in ( 'GETTIMEOFDAY', 
+                  'CLOCKGETTIME', 
+                  'GETRUSAGE', 
+                  'GETPAGESIZE', 
+                  'GETTICKCOUNT', 
+                  'GETPROCESSTIMES',
+                  'LWPINFO',
+                  'STRERROR_R',
+                  'LOCALTIME_R',
+                  'GEJSV',
+                  'GESVJ',
+                  'SINCOS',
+                  'UNORDERED_MAP',
+                  'BOOST_IOSTREAMS',
+                  'BACKTRACE',
+                  'CXXDEMANGLE',
+                  'SSE2',
+                  'SSE3',
+                  'AVX',
+                  'AVX2',
+                  'MIC',
+                  'AVX512F',
+                  'VSX',
+                  'NEON' ):
+        define = 'HAS_' + func
+        if compenv[define] == 'yes' : compenv[define] = '1'
+        else :                        compenv[define] = '0'
+
+    if compenv['HAS_CPUID'] == 'yes'  : compenv['HAS_CPUID'] = '1'
+    else :                              compenv['HAS_CPUID'] = '0'
+
+    for feat in ( 'ZLIB',
+                  'METIS',
+                  'MONGOOSE',
+                  'SCOTCH',
+                  'GSL',
+                  'HDF5',
+                  'NETCDF',
+                  'CGAL',
+                  'SVML',
+                  'LIBMVEC',
+                  'AMDLIBM',
+                  'ACML',
+                  'MKL',
+                  'MKL_SEQ',
+                  'CUDA',
+                  'HIP',
+                  'ILP64' ):
+        if compenv[feat] == 'yes' : compenv['USE_' + feat] = '1'
+        else :                      compenv['USE_' + feat] = '0'
+
+    # convert BSP type to numerical value for preprocessor
+    if compenv['NET_TYPE'] == 'SEQ' : compenv['NET_TYPE'] = '1' 
+
+    # compose flags for hpro-config
+    compenv['CFGCFLAGS']  = ''
+    compenv['CFGLFLAGS']  = ''
+
+    # LAPACK is chosen by application, not by HLIBpro
+    # !!! conflict with MKL possible !!!
+    # if compenv['LAPACK_LIB'] == 'CLAPACK' : compenv['CFGLFLAGS'] += ' -lclapack'
+    # else :                                  compenv['CFGLFLAGS'] += ' ' + compenv['LAPACK_LIB']
+
+    if compenv['BOOSTCFLAGS' ] != '' :     
+        compenv['CXXFLAGS']  += ' ' + compenv['BOOSTCFLAGS'] 
+        compenv['CFGCFLAGS'] += ' ' + compenv['BOOSTCFLAGS'] 
+    if compenv['BOOSTLFLAGS' ] != '' :     
+        compenv['LFLAGS']    += ' ' + compenv['BOOSTLFLAGS'] 
+        compenv['CFGLFLAGS'] += ' ' + compenv['BOOSTLFLAGS'] 
+
+    if compenv['HAS_BOOST_IOSTREAMS' ] == '1' :  # 'yes' replaced by '1' above
+        compenv['LFLAGS']    += ' -lboost_iostreams'
+        compenv['CFGLFLAGS'] += ' -lboost_iostreams'
+        
+    if compenv['MKL'] == 'yes' :
+        compenv['CFGCFLAGS'] += ' ' + compenv['MKLCFLAGS']
+
+    if compenv['CUDA'] == 'yes' :
+        compenv['CFGCFLAGS'] += ' ' + compenv['CUDACFLAGS']
+        compenv['CFGLFLAGS'] += ' ' + compenv['CUDALFLAGS']
+
+    if compenv['HIP'] == 'yes' :
+        compenv['CFGCFLAGS'] += ' ' + compenv['HIPDEFINES'] + ' ' + compenv['HIPCFLAGS']
+        compenv['CFGLFLAGS'] += ' ' + compenv['HIPLFLAGS']
+
+    if compenv['ZLIB']   == 'yes' :
+        compenv['CFGLFLAGS'] += ' ' + compenv['ZLIBLFLAGS']
+    if compenv['METIS']  == 'yes' : 
+        compenv['CFGCFLAGS'] += ' ' + compenv['METISCFLAGS']
+        compenv['CFGLFLAGS'] += ' ' + compenv['METISLFLAGS']
+    # if compenv['CHACO']  == 'yes' :
+    #     compenv['CFGLFLAGS'] += ' ' + compenv['CHACOLFLAGS']
+    if compenv['SCOTCH'] == 'yes' :
+        compenv['CFGCFLAGS'] += ' ' + compenv['SCOTCHCFLAGS'] 
+        compenv['CFGLFLAGS'] += ' ' + compenv['SCOTCHLFLAGS']
+    if compenv['MONGOOSE']  == 'yes' : 
+        compenv['CFGCFLAGS'] += ' ' + compenv['MONGOOSECFLAGS']
+        compenv['CFGLFLAGS'] += ' ' + compenv['MONGOOSELFLAGS']
+    if compenv['GSL'] == 'yes' :
+        compenv['CFGCFLAGS'] += ' ' + compenv['GSLCFLAGS'] 
+        compenv['CFGLFLAGS'] += ' ' + compenv['GSLLFLAGS']
+    if compenv['HDF5'] == 'yes' :
+        compenv['CFGCFLAGS'] += ' ' + compenv['HDF5CFLAGS'] 
+        compenv['CFGLFLAGS'] += ' ' + compenv['HDF5LFLAGS']
+    if compenv['NETCDF'] == 'yes' :
+        compenv['CFGCFLAGS'] += ' ' + compenv['NETCDFCFLAGS'] 
+        compenv['CFGLFLAGS'] += ' ' + compenv['NETCDFLFLAGS']
+    if compenv['CGAL'] == 'yes' :
+        compenv['CFGCFLAGS'] += ' ' + compenv['CGALCFLAGS'] 
+    if compenv['AMDLIBM'] == 'yes':
+        compenv['CFGLFLAGS'] += ' ' + compenv['AMDLIBMLFLAGS']
+    if compenv['ACML']    == 'yes':
+        compenv['CFGLFLAGS'] += ' ' + compenv['ACMLLFLAGS']
+
+    if compenv['HPRODEBUG'] == 'yes' : compenv['HPRO_DEBUG'] = '1'
+    else :                             compenv['HPRO_DEBUG'] = '0'
+
+    #
+    # write final makefiles
+    #
+
+    if verbose >= 1: print( '' )  
+
+    # re-tidy after adding above flags
+    compenv = tidy_compenv( compenv )
+    
+    if True :
+        tmpenv = compenv.copy()
+
+        compenv['DEFINES'] = re.sub( '-D', '', compenv['DEFINES'] )
+
+        write_makefile( 'SConstruct.in', 'SConstruct', compenv )
+
+        compenv = tmpenv.copy()
+
+    # set version for hpro-config
+    compenv['VERSION'] = compenv["MAJVERSION"] + '.' + compenv["MINVERSION"]
+
+    write_makefile( 'include/hpro/config.h.in', 'include/hpro/config.h', compenv )
+    write_script(   'bin/hpro-config.in',       'bin/hpro-config',       compenv )
+
+    # make 'lib' directory if not yet existent
+    try :
+        os.stat( 'lib' )
+    except :
+        os.mkdir( 'lib' )
+
+###############################################################
+###############################################################
+##
+## execute program
+##
+###############################################################
+###############################################################
+
+main( compenv )

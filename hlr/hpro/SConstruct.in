@@ -1,0 +1,364 @@
+#
+# SCons build script for HLIBpro
+#
+
+# to enable print() syntax with python2
+from __future__ import print_function
+
+import SCons
+import os, sys
+import platform
+import re
+
+############################################################
+#
+# compiler, compilation flags, optional libraries and 
+# other settings
+#
+
+version       = '@MAJVERSION@.@MINVERSION@'
+
+cc            = '@CC@'
+cxx           = '@CXX@'
+fc            = '@FC@'
+
+ccflags       = Split( '@CFLAGS@' )
+cxxflags      = Split( '@CXXFLAGS@' )
+fcflags       = Split( '@FCFLAGS@' )
+defines       = Split( '@DEFINES@' )
+debug         = Split( '@DBGFLAGS@' )
+optim         = Split( '@OPTFLAGS@' )
+lflags        = Split( '@LFLAGS@' )
+
+lapack        = '@LAPACK_LIB@'
+
+zlib          = '@ZLIB@'
+zlib_cflags   = '@ZLIBCFLAGS@'
+zlib_lflags   = '@ZLIBLFLAGS@'
+
+metis         = '@METIS@'
+metis_cflags  = '@METISCFLAGS@'
+metis_lflags  = '@METISLFLAGS@'
+
+scotch        = '@SCOTCH@'
+scotch_cflags = '@SCOTCHCFLAGS@'
+scotch_lflags = '@SCOTCHLFLAGS@'
+
+chaco         = '@CHACO@'
+chaco_lflags  = '@CHACOLFLAGS@'
+
+mongoose        = '@MONGOOSE@'
+mongoose_cflags = '@MONGOOSECFLAGS@'
+mongoose_lflags = '@MONGOOSELFLAGS@'
+
+gsl           = '@GSL@'
+gsl_cflags    = '@GSLCFLAGS@'
+gsl_lflags    = '@GSLLFLAGS@'
+
+cairo         = '@CAIRO@'
+cairo_cflags  = '@CAIROCFLAGS@'
+cairo_lflags  = '@CAIROLFLAGS@'
+
+hdf5          = '@HDF5@'
+hdf5_cflags   = '@HDF5CFLAGS@'
+hdf5_lflags   = '@HDF5LFLAGS@'
+
+netcdf        = '@NETCDF@'
+netcdf_cflags = '@NETCDFCFLAGS@'
+netcdf_lflags = '@NETCDFLFLAGS@'
+
+cgal          = '@CGAL@'
+cgal_cflags   = '@CGALCFLAGS@'
+
+cxxlibs       = '@CXXLIBS@'
+
+# indicate, that CPU is X86 compatible and compiler supports SSE/AVX
+has_cpuid     = ('@HAS_CPUID@' == '1')
+has_sse3      = ('@HAS_SSE3@' == '1')
+has_avx       = ('@HAS_AVX@' == '1')
+has_avx2      = ('@HAS_AVX2@' == '1')
+has_avx512    = ('@HAS_AVX512F@' == '1')
+has_vsx       = ('@HAS_VSX@' == '1')
+has_neon      = ('@HAS_NEON@' == '1')
+
+# cache file storing SCons settings
+cache_file    = '.scons.options'
+
+# contrib library settings
+lapack_base   = '@LAPACK_BASE@'
+
+# various options
+fullmsg       = False
+buildtype     = 'debug'
+linktype      = 'static'
+warn          = False
+color         = True
+
+############################################################
+#
+# Help Text
+#
+
+Help( """
+Type
+  'scons'            to build HLIBpro.
+  'scons options'    to get help on command line build parameters.
+""" )
+
+######################################################################
+#
+# colorization
+#
+######################################################################
+
+# default color codes
+colors = { 'reset'  : '\033[0m',
+           'bold'   : '\033[1m',
+           'italic' : '\033[3m',
+           'red'    : '\033[31m',
+           'green'  : '\033[32m',
+           'yellow' : '\033[33m',
+           'blue'   : '\033[34m',
+           'purple' : '\033[35m',
+           'cyan'   : '\033[36m',
+           'gray'   : '\033[37m' }
+
+# no colors if wanted or output is not a terminal ('dumb' is for emacs)
+if not color or not sys.stdout.isatty() or os.environ['TERM'] == 'dumb' :
+    for key in colors.keys() :
+        colors[key] = ''
+else :
+    # try to handle above codes on non-supported systems
+    try:
+        import colorama
+
+        colorama.init()
+    except :
+        pass
+        
+############################################################
+#
+# determine system
+#
+
+system = platform.system()
+
+if system in ( 'Microsoft', 'MSWin32', 'MSWin64' ):
+    system = 'Windows'
+
+############################################################
+#
+# eval options
+#
+
+opts = Variables( cache_file )
+opts.Add( BoolVariable( 'fullmsg',   'set to enable full output',                        0 ) )
+opts.Add( EnumVariable( 'buildtype', 'how to build HLIBcore (debug/release)', 'debug', allowed_values = [ 'debug', 'release' ], ignorecase = 2 ) )
+opts.Add( BoolVariable( 'warn',      'enable building with compiler warnings', warn ) )
+opts.Add( BoolVariable( 'color',     'use colored output during compilation',  color ) )
+if system == 'Windows':
+    opts.Add( EnumVariable( 'linktype',  'how to link with HLIBpro (static/shared)', 'shared', allowed_values = [ 'static', 'shared' ], ignorecase = 2 ) )
+else:
+    opts.Add( EnumVariable( 'linktype',  'how to link with HLIBpro (static/shared)', 'static', allowed_values = [ 'static', 'shared' ], ignorecase = 2 ) )
+
+# read options from cache_file
+opt_env = Environment( options = opts )
+
+buildtype = opt_env['buildtype']
+linktype  = opt_env['linktype']
+fullmsg   = opt_env['fullmsg']
+warn      = opt_env['warn']
+color     = opt_env['color']
+
+############################################################
+#
+# define environment
+#
+
+# prevent warning about mixing of C++ and Fortran
+SetOption( 'warn', 'no-fortran-cxx-mix' )
+
+# define base and derived environments
+base_env = Environment( options         = opts,
+                        ENV             = os.environ,
+                        CC              = cc,
+                        CXX             = cxx,
+                        FORTRAN         = fc,
+                        CPPDEFINES      = defines )
+
+if not opt_env['fullmsg'] :
+    base_env.Replace( CCCOMSTR        = " CC     $SOURCES" )
+    base_env.Replace( SHCCCOMSTR      = " CC     $SOURCES" )
+    base_env.Replace( CXXCOMSTR       = " C++    $SOURCES" )
+    base_env.Replace( SHCXXCOMSTR     = " C++    $SOURCES" )
+    base_env.Replace( FORTRANCOMSTR   = " FC     $SOURCES" )
+    base_env.Replace( SHFORTRANCOMSTR = " FC     $SOURCES" )
+    base_env.Replace( LINKCOMSTR      = " Link   $TARGET"  )
+    base_env.Replace( SHLINKCOMSTR    = " Link   $TARGET"  )
+    base_env.Replace( ARCOMSTR        = " AR     $TARGET"  )
+    base_env.Replace( RANLIBCOMSTR    = " Index  $TARGET"  )
+    base_env.Replace( INSTALLSTR      = " Install   $TARGET" )
+
+# add flags for specific compilation modes
+if buildtype == 'debug' :
+    base_env.Append( CFLAGS       = debug )
+    base_env.Append( CXXFLAGS     = debug )
+    base_env.Append( FORTRANFLAGS = debug )
+    base_env.Append( LINKFLAGS    = debug )
+elif buildtype == 'release' :
+    base_env.Append( CFLAGS       = optim )
+    base_env.Append( CXXFLAGS     = optim )
+    base_env.Append( FORTRANFLAGS = optim )
+    base_env.Append( CPPDEFINES   = [ 'NDEBUG' ] )
+
+# have to put this after optimisation since some compilers
+# redefine architecture in optimisation, e.g. "-fast"
+base_env.Append( CFLAGS       = ccflags )
+base_env.Append( CXXFLAGS     = cxxflags )
+base_env.Append( FORTRANFLAGS = fcflags )
+
+hlibpro_env = base_env.Clone()
+
+if system == 'Windows' or system == 'Darwin' :
+    hlibpro_env.MergeFlags( lflags )
+
+# add LAPACK
+if lapack != 'IGNORE':
+    # not yet handled by SCons
+    if re.findall( 'sunperf', lapack ) != []:
+        if system == 'Windows':
+            hlibpro_env.Append( LINKFLAGS = lapack )
+    elif re.findall( '-mkl', lapack ) != []:
+        if system == 'Windows':
+            hlibpro_env.Append( LINKFLAGS = lapack )
+    else:
+        if system == 'Windows':
+            hlibpro_env.MergeFlags( lapack )
+
+# add zlib
+if zlib == 'yes':
+    if system == 'Windows':
+        hlibpro_env.MergeFlags( zlib_cflags + ' ' + zlib_lflags )
+    else:
+        hlibpro_env.MergeFlags( zlib_cflags )
+
+# add METIS
+if metis == 'yes':
+    if system == 'Windows':
+        hlibpro_env.MergeFlags( metis_cflags + ' ' + metis_lflags )
+    else:
+        hlibpro_env.MergeFlags( metis_cflags )
+
+# add Scotch
+if scotch == 'yes':
+    if system == 'Windows':
+        hlibpro_env.MergeFlags( scotch_cflags + ' ' + scotch_lflags )
+    else:
+        hlibpro_env.MergeFlags( scotch_cflags )
+
+# add Chaco
+if chaco == 'yes':
+    if system == 'Windows':
+        hlibpro_env.MergeFlags( chaco_lflags )
+
+# add MONGOOSE
+if mongoose == 'yes':
+    if system == 'Windows':
+        hlibpro_env.MergeFlags( mongoose_cflags + ' ' + mongoose_lflags )
+    else:
+        hlibpro_env.MergeFlags( mongoose_cflags )
+
+# add GSL
+if gsl == 'yes':
+    if system == 'Windows':
+        hlibpro_env.MergeFlags( gsl_cflags + ' ' + gsl_lflags )
+    else:
+        hlibpro_env.MergeFlags( gsl_cflags )
+
+# add HDF5
+if hdf5 == 'yes':
+    if system == 'Windows':
+        hlibpro_env.MergeFlags( hdf5_cflags + ' ' + hdf5_lflags )
+    else:
+        hlibpro_env.MergeFlags( hdf5_cflags )
+
+# add NetCDF
+if netcdf == 'yes':
+    if system == 'Windows':
+        hlibpro_env.MergeFlags( netcdf_cflags + ' ' + netcdf_lflags )
+    else:
+        hlibpro_env.MergeFlags( netcdf_cflags )
+
+# add CGAL
+if cgal == 'yes':
+    hlibpro_env.MergeFlags( cgal_cflags )
+
+# create special environment for various instruction sets
+sse3_env   = hlibpro_env.Clone()
+avx_env    = hlibpro_env.Clone()
+avx2_env   = hlibpro_env.Clone()
+avx512_env = hlibpro_env.Clone()
+vsx_env    = hlibpro_env.Clone()
+neon_env   = hlibpro_env.Clone()
+mic_env    = hlibpro_env.Clone()
+if has_cpuid :
+    if has_sse3   : sse3_env.Append(   CXXFLAGS = '-O2 -march=westmere -msse3' )
+    if has_avx    : avx_env.Append(    CXXFLAGS = '-O2 -march=sandybridge -mavx' )
+    if has_avx2   : avx2_env.Append(   CXXFLAGS = '-O2 -march=haswell -mavx2' )
+    if has_avx512 : avx512_env.Append( CXXFLAGS = '-O2 -march=skylake-avx512 -mavx512f -mavx512cd' )
+    if has_vsx    : vsx_env.Append(    CXXFLAGS = '-O2 -mvsx' )
+
+# export environments and additional options
+Export( 'opt_env' )
+Export( 'base_env' )
+Export( 'hlibpro_env' )
+Export( 'sse3_env' )
+Export( 'avx_env' )
+Export( 'avx2_env' )
+Export( 'avx512_env' )
+Export( 'vsx_env' )
+Export( 'neon_env' )
+Export( 'mic_env' )
+
+#
+# save options
+#
+
+opts.Save( cache_file, base_env )
+
+############################################################
+#
+# define subdirectories and collect source files
+#
+
+subdirs = [ 'src' ]
+
+for subdir in subdirs:
+    SConscript( '%s/SConscript' % subdir )
+
+############################################################
+#
+# Target: options
+#
+
+#
+# print options
+#
+def show_options ( target, source, env ):
+    bool_str = { False : colors['bold'] + colors['red']   + '✘' + colors['reset'],
+                 True  : colors['bold'] + colors['green'] + '✔' + colors['reset'] }
+    
+    print() 
+    print( 'Type  \'{0}scons <option>=<value> ...{1}\'  where <option> is one of'.format( colors['italic'], colors['reset'] ) )
+    print()
+    print( '  {0}Option{1}    │ {0}Description{1}                                       │ {0}Value{1}'.format( colors['bold'], colors['reset'] ) )
+    print( ' ───────────┼───────────────────────────────────────────────────┼─────────' )
+    print( '  {0}buildtype{1} │ define build type for library (debug,release)     │'.format( colors['bold'], colors['reset'] ), buildtype )
+    print( '  {0}linktype{1}  │ define how to link with library (static,shared)   │'.format( colors['bold'], colors['reset'] ), linktype )
+    print( '  {0}fullmsg{1}   │ enable/disable full output                        │'.format( colors['bold'], colors['reset'] ), bool_str[ fullmsg ] )
+    print( '  {0}color{1}     │ use colored output                                │'.format( colors['bold'], colors['reset'] ), bool_str[ color ] )
+    print() 
+
+options_cmd = base_env.Command( 'phony-target-options', None, show_options )
+base_env.Alias( 'options', options_cmd )
+

@@ -1,0 +1,43 @@
+# standard files to exclude
+syntax: glob
+
+*.o
+*.os
+*.obj
+*~
+*.a
+*.so
+*.dylib
+*.swp
+*.pdb
+.gdb_history
+*.eps
+*.pdf
+*.out
+*.log
+*.hm
+*.vtk
+*.dot
+
+.hlibpro.conf
+hlibpro
+
+.hpx.ini
+
+machines.gpi
+
+# now some special things
+syntax: regexp
+
+^\.scons.*
+^.*\.cache
+^.*\.log
+
+^hlrtest$
+^programs/(.*)-(seq|omp|tbb|tf|hpx|mpi)$
+^programs/(.*/.*)-(seq|omp|tbb|tf|hpx|mpi)$
+#^(tlr|tileh)-mpi-(bcast|ibcast|rdma)$
+#^(tlr|tileh)-gaspi$
+
+# gtags files
+^(GPATH|GRTAGS|GSYMS|GTAGS)$

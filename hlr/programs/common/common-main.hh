@@ -1,0 +1,58 @@
+#include <hlr/utils/mach.hh>
+
+//
+// forward for framework specific main function
+//
+template < typename problem_t >
+void framework_main ();
+
+//
+// default main function
+//
+#define HLR_DEFAULT_MAIN                        \
+    int                                         \
+    main ( int argc, char ** argv )             \
+    {                                           \
+        return hlr_main( argc, argv );          \
+    } 
+
+//
+// actual HLR main function 
+//
+int
+hlr_main ( int argc, char ** argv )
+{
+    try
+    {
+        Hpro::INIT();
+
+        hlr::cmdline::parse( argc, argv );
+    
+        std::cout << hlr::term::bullet << hlr::term::bold << Hpro::Mach::hostname() << hlr::term::reset << std::endl
+                  << "    processor : " << hlr::mach::cpu() << std::endl
+                  << "    cores     : " << hlr::mach::cpuset() << std::endl;
+        
+        Hpro::CFG::set_verbosity( hlr::verbosity );
+
+        // if ( hlr::nthreads != 0 )
+        //     Hpro::CFG::set_nthreads( hlr::nthreads );
+
+        if      ( hlr::appl == "logkernel"    ) framework_main< hlr::apps::log_kernel >();
+        else if ( hlr::appl == "log"          ) framework_main< hlr::apps::log_kernel >();
+        else if ( hlr::appl == "materncov"    ) framework_main< hlr::apps::matern_covariance >();
+        else if ( hlr::appl == "laplaceslp"   ) framework_main< hlr::apps::laplace_slp >();
+        // else if ( hlr::appl == "helmholtzslp" ) framework_main< hlr::apps::helmholtz_slp >();
+        else if ( hlr::appl == "exp"          ) framework_main< hlr::apps::exp >();
+        else if ( hlr::appl == "gaussian"     ) framework_main< hlr::apps::gaussian >();
+        else if ( hlr::appl == "exponential"  ) framework_main< hlr::apps::exponential >();
+        else if ( hlr::appl == "volhelmholtz" ) framework_main< hlr::apps::volume_helmholtz >();
+        else
+            HLR_ERROR( "unknown application (" + hlr::appl + ")" );
+
+        Hpro::DONE();
+    }// try
+    catch ( std::exception &  e ) { std::cout << e.what() << std::endl; }
+    catch ( char const *      e ) { std::cout << hlr::term::red( hlr::term::bold( e ) ) << std::endl; }
+    
+    return 0;
+}

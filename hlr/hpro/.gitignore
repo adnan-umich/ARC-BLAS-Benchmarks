@@ -1,0 +1,14 @@
+*~
+*.o
+*.a
+.scons.options
+.sconsign.dblite
+config.cache
+config.log
+GPATH
+GRTAGS
+GTAGS
+SConstruct
+bin/hpro-config
+include/hpro/config.h
+lib/
