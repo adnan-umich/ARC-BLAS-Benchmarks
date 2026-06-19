@@ -53,6 +53,25 @@ require_hpro_source_tree() {
         exit 1
     fi
 }
+require_libpl_source_tree() {
+    local libpl_dir="$ROOT_DIR/libplanc"
+    local missing=()
+    local required=(
+        "CMakeLists.txt"
+    )
+
+    for path in "${required[@]}"; do
+        [[ -e "$libpl_dir/$path" ]] || missing+=("$path")
+    done
+
+    if ((${#missing[@]} > 0)); then
+        printf 'error: bundled lipblanc source tree is missing.\n' >&2
+        printf 'Missing files under %s:\n' "$libpl_dir" >&2
+        printf '  %s\n' "${missing[@]}" >&2
+        printf '\nYou likely need to initialize the git submodules before running this script.\n' >&2
+        exit 1
+    fi
+}
 
 prompt_prefix() {
     local prefix="${BUILD_PREFIX:-}"
@@ -122,14 +141,18 @@ require_cmd gfortran "gfortran is not available. Load a GCC compiler module that
 require_cmd pkg-config "pkg-config is required to locate FlexiBLAS."
 require_cmd python "Python is not available. Load a Python module first."
 require_cmd scons "SCons is not available. Load a Python module that includes the scons command."
+require_cmd cmake "CMake is not available. Load a cmake module first."
 
 require_hpro_source_tree
+require_libpl_source_tree
 
 python - <<'PY' || die "Python cannot import SCons. Load a Python module that includes scons, or install scons into it."
 import SCons
 PY
 
 pkg-config --exists flexiblas || die "FlexiBLAS is not available through pkg-config. Load FlexiBLAS and ensure PKG_CONFIG_PATH is set."
+pkg-config --exists armadillo || die "Armadillo is not available through pkg-config. Load Armadillo and ensure PKG_CONFIG_PATH is set."
+pkg-config --exists hdf5 || die "hdf5 is not available through pkg-config. Load hdf5 and ensure PKG_CONFIG_PATH is set."
 
 BOOST_ROOT="$(find_boost_root)"
 TBB_ROOT="$(find_tbb_root)"
@@ -182,6 +205,15 @@ cd "$ROOT_DIR/hlr"
 log "Installing HLR artifacts into $BUILD_PREFIX/hlr"
 copy_hlr_outputs "$BUILD_PREFIX"
 
+log "Building libplanc-bench"
+mkdir -p "$ROOT_DIR/libplanc/build"
+cd "$ROOT_DIR/libplanc/build"
+cmake .. -DBUILD_BENCH=ON \
+ -DBUILD_EXECUTABLE=ON \
+ -DCMAKE_INSTALL_PREFIX="$ROOT_DIR/libplanc/"
+
+cmake --build .
+cmake --install .
 cat <<EOF
 
 Build complete.
@@ -195,4 +227,12 @@ HLR install tree:
 To use the Python package:
   source "$VENV_DIR/bin/activate"
 
+HLR benchmark executables are in:
+  $ROOT_DIR/hlr/bin
+
+libplanc executables are in
+  $BUILD_PREFIX/libplanc/bin
+
+libplanc libraries are in
+  $BUILD_PREFIX/libplanc/lib64
 EOF
