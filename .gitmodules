@@ -1,0 +1,3 @@
+[submodule "libplanc"]
+	path = libplanc
+	url = https://github.com/welch-lab/libplanc.git
