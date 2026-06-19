@@ -1,0 +1,124 @@
+#ifndef __HPRO_CONFIG_HH
+#define __HPRO_CONFIG_HH
+/*
+ * Project     : HLIBpro
+ * File        : config.h
+ * Description : configuration settings
+ * Author      : Ronald Kriemann
+ * Copyright   : Max Planck Institute MIS 2004-2022. All Rights Reserved.
+ */
+
+/* HLIBpro namespace override */
+#define  Hpro                    Hpro
+
+/* prefix all HLIBpro types/functions in lower case */
+#define  HPRO_PF( name )         hpro_##name
+
+/* prefix all HLIBpro constants in upper case */
+#define  HPRO_CONST_PF( name )   HPRO_##name
+
+/*
+ * set to 1 if the following libraries are available and
+ * set to 0 otherwise 
+ */
+
+#define HPRO_USE_TBB                  @USE_TBB@
+#define HPRO_USE_ZLIB                 @USE_ZLIB@
+#define HPRO_USE_METIS                @USE_METIS@
+#define HPRO_USE_SCOTCH               @USE_SCOTCH@
+#define HPRO_USE_CHACO                0
+#define HPRO_USE_MONGOOSE             @USE_MONGOOSE@
+#define HPRO_USE_FFTW3                0
+#define HPRO_USE_GSL                  @USE_GSL@
+#define HPRO_USE_CAIRO                0
+#define HPRO_USE_HDF5                 @USE_HDF5@
+#define HPRO_USE_NETCDF               @USE_NETCDF@
+#define HPRO_USE_AMDLIBM              @USE_AMDLIBM@
+#define HPRO_USE_ACML                 @USE_ACML@
+#define HPRO_USE_SVML                 @USE_SVML@
+#define HPRO_USE_LIBMVEC              @USE_LIBMVEC@
+#define HPRO_USE_MKL                  @USE_MKL@
+#define HPRO_USE_MKL_SEQ              @USE_MKL_SEQ@
+#define HPRO_USE_CUDA                 @USE_CUDA@
+#define HPRO_USE_HIP                  @USE_HIP@
+#define HPRO_USE_VAMPIRTRACE          0
+#define HPRO_USE_CGAL                 @USE_CGAL@
+
+/*
+ * set to 1 if the following functions are available and
+ * set to 0 otherwise 
+ */
+
+#define HPRO_HAS_CLOCKGETTIME         @HAS_CLOCKGETTIME@
+#define HPRO_HAS_GETTIMEOFDAY         @HAS_GETTIMEOFDAY@
+#define HPRO_HAS_GETTICKCOUNT         @HAS_GETTICKCOUNT@
+#define HPRO_HAS_GETPROCESSTIMES      @HAS_GETPROCESSTIMES@
+#define HPRO_HAS_LOCALTIME_R          @HAS_LOCALTIME_R@
+#define HPRO_HAS_GETRUSAGE            @HAS_GETRUSAGE@
+#define HPRO_HAS_LWPINFO              @HAS_LWPINFO@
+#define HPRO_HAS_C99COMPLEX           0
+
+#define HPRO_HAS_GETPAGESIZE          0 /* @HAS_GETPAGESIZE@ */
+#define HPRO_HAS_MMAP                 0 /* @HAS_MMAP@ */
+
+#define HPRO_HAS_STRERROR_R           @HAS_STRERROR_R@
+#define HPRO_HAS_BACKTRACE            @HAS_BACKTRACE@
+#define HPRO_HAS_CXXDEMANGLE          @HAS_CXXDEMANGLE@
+
+#define HPRO_HAS_UNORDERED_MAP        0
+#define HPRO_HAS_BOOST_UNORDERED_MAP  1
+#define HPRO_HAS_BOOST_IOSTREAMS      @HAS_BOOST_IOSTREAMS@
+
+#define HPRO_HAS_GEJSV                @HAS_GEJSV@
+#define HPRO_HAS_GESVJ                @HAS_GESVJ@
+#define HPRO_HAS_SINCOS               @HAS_SINCOS@
+#define HPRO_HAS_GEQP3_TRUNC          0
+
+#define HPRO_USE_ILP64                @USE_ILP64@
+
+#define HPRO_HAS_CPUID                @HAS_CPUID@
+#define HPRO_HAS_SSE3                 @HAS_SSE3@
+#define HPRO_HAS_AVX                  @HAS_AVX@
+#define HPRO_HAS_AVX2                 @HAS_AVX2@
+#define HPRO_HAS_MIC                  @HAS_MIC@
+#define HPRO_HAS_AVX512F              @HAS_AVX512F@
+#define HPRO_HAS_VSX                  @HAS_VSX@
+#define HPRO_HAS_NEON                 @HAS_NEON@
+
+/*
+ * set to 1 to activate various features or change
+ * behaviour of algorithms
+ */
+
+/* activate to enable additional debugging features */
+#define HPRO_DEBUG                    @HPRO_DEBUG@
+
+/* activate argument tests in inline functions of BLAS module
+ * (also activated by HPRO_DEBUG) */
+#define HPRO_BLAS_TESTS               0
+
+/* activate to enable flop counting */
+#define HPRO_COUNT_FLOPS              0
+
+/* activate to enable old TBB functions */
+#define HPRO_HAS_TBB_DEPRECATED       0
+
+/*
+ * define type of network environment
+ *   1 : sequential
+ *   2 : MPI library
+ *   3 : shared memory
+ */
+
+#define HPRO_NET_TYPE                 @NET_TYPE@
+
+/*
+ * define internal HLIBpro allocator
+ *
+ *   default:     hpro_allocator< T >      (standard free/malloc)
+ *   alternative: tbb::tbb_allocator< T >
+ *
+ */
+#define HPRO_ALLOCATOR                hpro_allocator< T >
+
+#endif

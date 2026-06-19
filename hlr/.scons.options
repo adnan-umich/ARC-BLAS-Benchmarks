@@ -1,4 +1,4 @@
-programs = 'dag-lu'
+programs = 'approx-lu,approx-mm,uniform-lu,uniform-mm'
 frameworks = 'seq,tbb'
 lapack = 'user'
 lapackflags = '-lflexiblas '

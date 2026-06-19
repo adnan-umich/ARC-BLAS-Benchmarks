@@ -1,0 +1,94 @@
+#! /bin/sh
+
+prefix=@PREFIX@
+
+# test unset prefix
+if [ "$prefix" = "" ]; then
+    prefix="$(cd "$(dirname "$0")"; pwd)";
+
+    # remove '/bin' from prefix
+    prefix_base="$( basename $prefix)"
+    if [ "$prefix_base" = "bin" ]; then
+        prefix="$(dirname $prefix)"
+    fi
+fi
+
+exec_prefix=${prefix}
+
+CFLAGS="@CFGCFLAGS@"
+LFLAGS="@CFGLFLAGS@ -lm"
+
+usage()
+{
+  cat <<EOF
+Usage: hlib-config [OPTIONS] [LIBRARIES]
+Options:
+ [--prefix[=DIR]]
+ [--version]
+ [--lflags]
+ [--cflags]
+EOF
+  exit $1
+}
+
+if test $# -eq 0 ; then
+    usage 1 1>&2
+fi
+
+while test $# -gt 0 ; do
+    case "$1" in
+        -*=*) optarg=`echo "$1" | sed 's/[-_a-zA-Z0-9]*=//'` ;;
+        *) optarg= ;;
+    esac
+    
+    case $1 in
+        --prefix=*)
+        prefix=$optarg
+        local_prefix=yes
+        ;;
+        --prefix)
+            echo_prefix=yes
+            ;;
+        --version)
+            echo @VERSION@
+            exit 0
+            ;;
+        --cflags)
+            echo_cflags=yes
+            ;;
+        --lflags)
+            echo_lflags=yes
+            ;;
+        *)
+            usage 1 1>&2
+            ;;
+    esac
+    shift
+done
+
+OUTPUT=""
+
+if test "$echo_prefix" = "yes" ; then
+    OUTPUT="$OUTPUT $prefix"
+fi
+
+if test "$echo_cflags" = "yes" ; then
+    if test "${prefix}/include" != "/usr/include" ; then
+        OUTPUT="$OUTPUT $cflags -I${prefix}/include $CFLAGS"
+    else
+        OUTPUT="$OUTPUT $cflags $CFLAGS"
+    fi
+fi
+
+if test "$echo_lflags" = "yes" ; then
+    libs="-lhpro"
+    if test "${prefix}/lib" != "/usr/lib" ; then
+        OUTPUT="$OUTPUT -L${prefix}/lib $libs $LFLAGS"
+    else
+        OUTPUT="$OUTPUT $libs $LFLAGS"
+    fi
+fi
+
+echo $OUTPUT
+
+# EOF

@@ -1,0 +1,9 @@
+{
+    "arch": "x86_64",
+    "cpu": "Intel(R) Xeon(R) Gold 6140 CPU @ 2.30GHz",
+    "machine": "gl-build.arc-ts.umich.edu",
+    "num_cpu": "72",
+    "os": "Linux 4.18.0-553.85.1.el8_10.x86_64",
+    "ram": "196094136",
+    "version": 1
+}
