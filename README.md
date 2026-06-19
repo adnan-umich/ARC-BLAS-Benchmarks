@@ -1,3 +1,48 @@
+
+ARC Instructions
+=======
+1. Load FlexiBLAS, scons + asv (pip install), boost, tbb, hdf5
+2. Execute build script ./build.sh
+3. `asv run -v` executes scipy-blas benchmarks
+4. HLR benchmarks
+```
+ Laplace
+    FLEXIBLAS=default ./approx-mm-seq-flexiblas --config laplace.conf --grid sphere-6 -e 1e-4 --nbench 10 --tbench 1e10 --arith std --approx svd
+flexiblas BLAS backend  "DEFAULT" not found. Loading default (NETLIB) instead.
+    FLEXIBLAS=default ./approx-lu-seq-flexiblas --config laplace.conf --grid sphere-6 -e 1e-4 --nbench 10 --tbench 1e10 --arith std --approx svd
+flexiblas BLAS backend  "DEFAULT" not found. Loading default (NETLIB) instead.
+    FLEXIBLAS=default ./uniform-mm-seq-flexiblas --config laplace.conf --grid sphere-6 -e 1e-4 --nbench 10 --tbench 1e10 --arith std --approx svd
+flexiblas BLAS backend  "DEFAULT" not found. Loading default (NETLIB) instead.
+    FLEXIBLAS=default ./uniform-lu-seq-flexiblas --config laplace.conf --grid sphere-6 -e 1e-4 --nbench 10 --tbench 1e10 --arith std --approx svd
+flexiblas BLAS backend  "DEFAULT" not found. Loading default (NETLIB) instead.
+  MaternCov
+    FLEXIBLAS=default ./approx-mm-seq-flexiblas --config materncov.conf --grid randcube-32768 -e 1e-4 --nbench 10 --tbench 1e10 --arith std --approx svd
+flexiblas BLAS backend  "DEFAULT" not found. Loading default (NETLIB) instead.
+    FLEXIBLAS=default ./approx-lu-seq-flexiblas --config materncov.conf --grid randcube-32768 -e 1e-4 --nbench 10 --tbench 1e10 --arith std --approx svd
+flexiblas BLAS backend  "DEFAULT" not found. Loading default (NETLIB) instead.
+    FLEXIBLAS=default ./uniform-mm-seq-flexiblas --config materncov.conf --grid randcube-32768 -e 1e-4 --nbench 10 --tbench 1e10 --arith std --approx svd
+flexiblas BLAS backend  "DEFAULT" not found. Loading default (NETLIB) instead.
+    FLEXIBLAS=default ./uniform-lu-seq-flexiblas --config materncov.conf --grid randcube-32768 -e 1e-4 --nbench 10 --tbench 1e10 --arith std --approx svd
+flexiblas BLAS backend  "DEFAULT" not found. Loading default (NETLIB) instead.
+
+## running parallel benchmarks
+
+  Laplace
+    FLEXIBLAS=default ./approx-mm-tbb-flexiblas --config laplace.conf --grid sphere-8 -e 1e-6 --nbench 10 --tbench 1e10 --approx svd --arith std
+./scripts/benchmark.sh: line 286: numactl: command not found
+    FLEXIBLAS=default ./approx-lu-tbb-flexiblas --config laplace.conf --grid sphere-8 -e 1e-6 --nbench 10 --tbench 1e10 --approx svd --arith dagstd
+./scripts/benchmark.sh: line 286: numactl: command not found
+    FLEXIBLAS=default ./uniform-mm-tbb-flexiblas --config laplace.conf --grid sphere-8 -e 1e-6 --nbench 10 --tbench 1e10 --approx svd --arith std
+./scripts/benchmark.sh: line 286: numactl: command not found
+  MaternCov
+    FLEXIBLAS=default ./approx-mm-tbb-flexiblas --config materncov.conf --grid randcube-131072 -e 1e-6 --nbench 10 --tbench 1e10 --approx svd --arith std
+./scripts/benchmark.sh: line 286: numactl: command not found
+    FLEXIBLAS=default ./approx-lu-tbb-flexiblas --config materncov.conf --grid randcube-131072 -e 1e-6 --nbench 10 --tbench 1e10 --approx svd --arith dagstd
+./scripts/benchmark.sh: line 286: numactl: command not found
+    FLEXIBLAS=default ./uniform-mm-tbb-flexiblas --config materncov.conf --grid randcube-131072 -e 1e-6 --nbench 10 --tbench 1e10 --approx svd --arith std
+./scripts/benchmark.sh: line 286: numactl: command not found
+```
+
 Results
 =======
 
