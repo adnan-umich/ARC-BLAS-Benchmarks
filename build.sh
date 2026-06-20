@@ -81,6 +81,16 @@ find_boost_root() {
     fi
 }
 
+find_tbb_root() {
+    if [[ -n "${TBB_ROOT:-}" ]]; then
+        printf '%s\n' "$TBB_ROOT"
+    elif [[ -n "${TBB_DIR:-}" ]]; then
+        printf '%s\n' "$TBB_DIR"
+    else
+        die "TBB is not loaded. Set TBB_ROOT or TBB_DIR before running this script."
+    fi
+}
+
 copy_hlr_outputs() {
     local prefix="$1"
     local bindir="$prefix/hlr/bin"
@@ -126,8 +136,10 @@ PY
 pkg-config --exists flexiblas || die "FlexiBLAS is not available through pkg-config. Load FlexiBLAS and ensure PKG_CONFIG_PATH is set."
 
 BOOST_ROOT="$(find_boost_root)"
+TBB_ROOT="$(find_tbb_root)"
 
 require_loaded_paths "Boost" "$BOOST_ROOT/include" "$BOOST_ROOT/lib"
+require_loaded_paths "tbb" "$TBB_ROOT/lib" "$TBB_ROOT/include"
 
 BUILD_PREFIX="$(prompt_prefix)"
 VENV_DIR="$BUILD_PREFIX/venv"
