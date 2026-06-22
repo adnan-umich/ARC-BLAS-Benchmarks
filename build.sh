@@ -113,10 +113,6 @@ copy_hlr_outputs() {
             ! -name '*.cc' ! -name '*.hh' ! -name '*.o' \
             -print
     )
-
-    if ! find "$bindir" -type f -perm -111 | grep -q .; then
-        die "No HLR benchmark executables were found to install."
-    fi
 }
 
 log "Checking required loaded software"
@@ -199,6 +195,4 @@ HLR install tree:
 To use the Python package:
   source "$VENV_DIR/bin/activate"
 
-HLR benchmark executables are in:
-  $BUILD_PREFIX/hlr/bin
 EOF

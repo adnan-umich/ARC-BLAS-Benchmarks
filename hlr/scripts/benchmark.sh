@@ -10,7 +10,7 @@
 ######################################################################
 
 # set of FlexiBLAS backends to benchmark (e.g. "OpenBLAS MKL BLIS")
-FLEXIBLAS_BACKENDS="default"
+FLEXIBLAS_BACKENDS=""
 
 # set of frameworks to use
 FRAMEWORKS="seq tbb"
@@ -22,7 +22,7 @@ PROGRAMS="approx-mm approx-lu uniform-mm uniform-lu"
 APPLICATIONS="laplace materncov"
 
 # if 1, just build benchmark programs
-JUST_BUILD=0
+JUST_BUILD=1
 
 # if 1, only simulate benchmarking
 DRY_RUN=0
