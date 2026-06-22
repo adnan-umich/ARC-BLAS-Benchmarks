@@ -203,24 +203,6 @@ fi
 ######################################################################
 
 #
-# update HLR
-#
-
-if [[ $DRY_RUN == 0 ]]; then
-
-    echo
-    echo "updating HLR"
-    echo
-    
-    git pull
-
-    if [ "$?" != "0" ]; then
-        echo "error while updating HLR"
-        exit 1
-    fi
-fi
-
-#
 # define common settings without building anything
 #
 SCONS="$SCONS programs=approx-mm,approx-lu,uniform-mm,uniform-lu frameworks=seq,tbb buildtype=release hpro=$HPRO_DIR tbb=$TBB_DIR"
