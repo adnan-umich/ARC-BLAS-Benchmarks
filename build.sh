@@ -110,6 +110,14 @@ find_tbb_root() {
     fi
 }
 
+find_vcpkg_root() {
+    if [[ -n "${VCPKG_ROOT:-}" ]]; then
+        printf '%s\n' "$VCPKG_ROOT"
+    else
+        die "VCPKG is not present. Set VCPKG_ROOT before running this script."
+    fi
+}
+
 copy_hlr_outputs() {
     local prefix="$1"
     local bindir="$prefix/hlr/bin"
@@ -206,9 +214,11 @@ log "Installing HLR artifacts into $BUILD_PREFIX/hlr"
 copy_hlr_outputs "$BUILD_PREFIX"
 
 log "Building libplanc-bench"
+cp "$ROOT_DIR/vcpkg.json" "$ROOT_DIR/libplanc/vcpkg.json"
 mkdir -p "$ROOT_DIR/libplanc/build"
 cd "$ROOT_DIR/libplanc/build"
-cmake .. -DBUILD_BENCH=ON \
+cmake .. -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+ -DBUILD_BENCH=ON \
  -DBUILD_EXECUTABLE=ON \
  -DCMAKE_INSTALL_PREFIX="$ROOT_DIR/libplanc/"
 
@@ -231,8 +241,8 @@ HLR benchmark executables are in:
   $ROOT_DIR/hlr/bin
 
 libplanc executables are in
-  $BUILD_PREFIX/libplanc/bin
+  $ROOT_DIR/libplanc/bin
 
 libplanc libraries are in
-  $BUILD_PREFIX/libplanc/lib64
+  $ROOT_DIR/libplanc/lib64
 EOF
